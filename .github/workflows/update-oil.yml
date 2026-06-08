@@ -2,8 +2,8 @@ name: Update Oil Price
 
 on:
   schedule:
-    - cron: '*/5 * * * *'  # 每5分钟
-  workflow_dispatch:        # 手动触发
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
 
 jobs:
   update:
@@ -15,31 +15,42 @@ jobs:
 
       - name: Fetch oil price from Sina
         run: |
-          # 抓取 WTI原油 (hf_CL) 和 布伦特 (hf_OIL)
-          WTI=$(curl -s -H "Referer: https://finance.sina.com.cn/" "https://hq.sinajs.cn/list=hf_CL" | iconv -f GBK -t UTF-8 | grep -oP '"\K[^"]+')
-          BRENT=$(curl -s -H "Referer: https://finance.sina.com.cn/" "https://hq.sinajs.cn/list=hf_OIL" | iconv -f GBK -t UTF-8 | grep -oP '"\K[^"]+')
+          python3 << 'PYEOF'
+          import subprocess, json, re
+          from datetime import datetime
 
-          # 解析数据: data[0]=最新价, data[7]=昨收, data[3]=最高, data[4]=最低
-          parse() {
-            echo "$1" | awk -F',' '{printf "{\"price\":%s,\"prevClose\":%s,\"high\":%s,\"low\":%s}", $1, $8, $4, $5}'
+          def fetch(code):
+              r = subprocess.run(['curl', '-s', '-H', 'Referer: https://finance.sina.com.cn/',
+                  f'https://hq.sinajs.cn/list={code}'], capture_output=True)
+              text = r.stdout.decode('gbk', errors='replace')
+              m = re.search(r'"([^"]*)"', text)
+              if m:
+                  d = m.group(1).split(',')
+                  if len(d) >= 8 and d[0] and d[7]:
+                      return {
+                          'price': float(d[0]),
+                          'prevClose': float(d[7]),
+                          'high': float(d[3]) if d[3] else None,
+                          'low': float(d[4]) if d[4] else None
+                      }
+              return None
+
+          wti = fetch('hf_CL')
+          brent = fetch('hf_OIL')
+
+          data = {
+              'updated': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+              'source': '新浪财经',
+              'wti': wti,
+              'brent': brent
           }
 
-          WTI_DATA=$(parse "$WTI")
-          BRENT_DATA=$(parse "$BRENT")
+          with open('oil.json', 'w', encoding='utf-8') as f:
+              json.dump(data, f, indent=2, ensure_ascii=False)
 
-          NOW=$(TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M:%S')
-
-          cat > oil.json << EOF
-          {
-            "updated": "${NOW}",
-            "source": "新浪财经",
-            "wti": ${WTI_DATA},
-            "brent": ${BRENT_DATA}
-          }
-          EOF
-
-          echo "Generated oil.json:"
-          cat oil.json
+          print('WTI:', wti)
+          print('Brent:', brent)
+          PYEOF
 
       - name: Commit and push
         run: |
