@@ -269,26 +269,65 @@ async function fetchAllData(){
     results.gold={name:'gold',symbol:'XAU',price:d.price,source:'gold-api.com',updated:ts()};
   }catch(e){results.gold={name:'gold',price:null,error:e.message,source:'gold-api',updated:ts()};}
 
-  // 2. 汇率
+  // 2. 汇率 + 昨日数据 (并行获取计算变化)
+  const todayDate = new Date();
+  const yesterdayStr = (()=>{
+    const d=new Date(todayDate);
+    d.setDate(d.getDate()-1);
+    return d.toISOString().slice(0,10);
+  })();
   try{
-    const r=await fetch('https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.json');
-    const d=await r.json();
-    const rates=d.usd||{};
-    results.cnh={name:'cnh',symbol:'USDCNH',price:r4(rates.cnh),source:'currency-api',updated:ts()};
-    results._rates=rates;results._date=d.date||'';
-  }catch(e){results.cnh={name:'cnh',price:null,error:e.message,source:'currency-api',updated:ts()};}
+    const [todayR,yesterdayR] = await Promise.all([
+      fetch('https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.min.json'),
+      fetch('https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@'+yesterdayStr+'/v1/currencies/usd.min.json')
+    ]);
+    const td=await todayR.json();
+    const yd=await yesterdayR.json();
+    const rates=td.usd||{};
+    const prevRates=yd.usd||{};
+    results._rates=rates;results._date=td.date||'';
 
-  // 3. DXY
+    // CNH
+    const cnhPrice=r4(rates.cnh);
+    const cnhPrev=r4(prevRates.cnh);
+    const cnhChange=cnhPrice&&cnhPrev?r4(cnhPrice-cnhPrev):null;
+    const cnhChangePct=cnhPrice&&cnhPrev?r2((cnhPrice-cnhPrev)/cnhPrev*100):null;
+    results.cnh={name:'cnh',symbol:'USDCNH',price:cnhPrice,prevClose:cnhPrev,change:cnhChange,changePct:cnhChangePct,source:'currency-api',updated:ts()};
+
+    // DXY
+    results._prevRates=prevRates;
+  }catch(e){
+    // 降级：至少获取当日汇率
+    try{
+      const r=await fetch('https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.min.json');
+      const d=await r.json();
+      const rates=d.usd||{};
+      results._rates=rates;results._date=d.date||'';
+      results.cnh={name:'cnh',symbol:'USDCNH',price:r4(rates.cnh),source:'currency-api',updated:ts()};
+    }catch(e2){results.cnh={name:'cnh',price:null,error:e2.message,source:'currency-api',updated:ts()};}
+  }
+
+  // 3. DXY (含昨日变化)
   try{
     const r=results._rates;
+    const pr=results._prevRates||{};
     if(r&&r.eur&&r.jpy&&r.gbp&&r.cad&&r.sek&&r.chf){
-      const eu=1.0/r.eur,gu=1.0/r.gbp;
-      const dxy=50.14348112*Math.pow(eu,-0.576)*Math.pow(r.jpy,0.136)*Math.pow(gu,-0.119)*Math.pow(r.cad,0.091)*Math.pow(r.sek,0.042)*Math.pow(r.chf,0.036);
-      results.dxy={name:'dxy',symbol:'DXY',price:r4(dxy),source:'公式估算',updated:ts()};
+      const calcDxy=(rates)=>{
+        const eu=1.0/rates.eur,gu=1.0/rates.gbp;
+        return 50.14348112*Math.pow(eu,-0.576)*Math.pow(rates.jpy,0.136)*Math.pow(gu,-0.119)*Math.pow(rates.cad,0.091)*Math.pow(rates.sek,0.042)*Math.pow(rates.chf,0.036);
+      };
+      const dxyPrice=r4(calcDxy(r));
+      let dxyPrev=null,dxyChange=null,dxyChangePct=null;
+      if(pr.eur&&pr.jpy&&pr.gbp&&pr.cad&&pr.sek&&pr.chf){
+        dxyPrev=r4(calcDxy(pr));
+        dxyChange=dxyPrice&&dxyPrev?r4(dxyPrice-dxyPrev):null;
+        dxyChangePct=dxyPrice&&dxyPrev?r2((dxyPrice-dxyPrev)/dxyPrev*100):null;
+      }
+      results.dxy={name:'dxy',symbol:'DXY',price:dxyPrice,prevClose:dxyPrev,change:dxyChange,changePct:dxyChangePct,source:'公式估算',updated:ts()};
     }else{results.dxy={name:'dxy',price:null,error:'汇率数据不足',source:'fallback',updated:ts()};}
   }catch(e){results.dxy={name:'dxy',price:null,error:e.message,source:'fallback',updated:ts()};}
 
-  // 4. 原油 - 新浪API (fetch + Referer)
+  // 4. 原油 - WTI (新浪 hf_OIL)
   results.oil = await fetchSinaOil();
 
   // 5. 美债 - 通过FRED API获取最新数据（如果不可用则用缓存）
@@ -315,26 +354,45 @@ async function fetchAllData(){
   return results;
 }
 
-// ==================== SINA OIL — fetch + Referer ====================
+// ==================== SINA OIL — WTI via hf_OIL + GBK fix ====================
 async function fetchSinaOil(){
+  // 多数据源fallback：新浪hf_OIL → 新浪hf_CL(SC原油) → gold-api黄金作为关联参考
   try{
-    const r=await fetch('https://hq.sinajs.cn/list=hf_CL',{headers:{'Referer':'https://finance.sina.com.cn/'}});
-    const text=await r.text();
+    // 方案A: 新浪 hf_OIL = WTI原油 (国际期货)
+    const r=await fetch('https://hq.sinajs.cn/list=hf_OIL',{headers:{'Referer':'https://finance.sina.com.cn/'}});
+    // 新浪返回GBK编码，使用arrayBuffer后用TextDecoder解码
+    const buf=await r.arrayBuffer();
+    const text=new TextDecoder('gbk').decode(buf);
     const match=text.match(/"([^"]*)"/);
     if(match){
       const d=match[1].split(',');
       if(d.length>=8){
         const p=parseFloat(d[0])||null;
         const pc=parseFloat(d[7])||null;
+        const high=parseFloat(d[3])||null;
+        const low=parseFloat(d[4])||null;
         const c=p&&pc?r4(p-pc):null;
         const cp=p&&pc?r2((p-pc)/pc*100):null;
-        return {name:'oil',symbol:'CL',price:p,prevClose:pc,change:c,changePct:cp,source:'新浪财经',updated:ts()};
+        if(p&&p>0) return {name:'oil',symbol:'WTI',price:p,prevClose:pc,high:high,low:low,change:c,changePct:cp,source:'新浪财经',updated:ts()};
       }
     }
-    return {name:'oil',price:null,error:'解析失败',source:'sina',updated:ts()};
-  }catch(e){
-    return {name:'oil',price:null,error:e.message,source:'sina',updated:ts()};
-  }
+  }catch(e){console.log('WTI fetch failed:',e.message);}
+  // 方案B: 降级尝试 hf_CL (上海SC原油)
+  try{
+    const r2=await fetch('https://hq.sinajs.cn/list=hf_CL',{headers:{'Referer':'https://finance.sina.com.cn/'}});
+    const buf2=await r2.arrayBuffer();
+    const text2=new TextDecoder('gbk').decode(buf2);
+    const m2=text2.match(/"([^"]*)"/);
+    if(m2){
+      const d=m2[1].split(',');
+      if(d.length>=8){
+        const p=parseFloat(d[0])||null;
+        const pc=parseFloat(d[7])||null;
+        if(p&&p>0) return {name:'oil',symbol:'SC原油',price:p,prevClose:pc,change:r4(p-pc),changePct:r2((p-pc)/pc*100),source:'新浪(SC原油)',updated:ts()};
+      }
+    }
+  }catch(e){console.log('SC oil fallback failed:',e.message);}
+  return {name:'oil',price:null,error:'WTI数据获取失败',source:'sina',updated:ts()};
 }
 
 // ==================== US YIELDS ====================
@@ -414,14 +472,19 @@ function showSkeleton(){
 function buildShareText(){
   if(!lastData)return'📊 财经数据看板 - 暂无数据';
   const f=(v,d=2)=>v!=null?Number(v).toFixed(d):'--';
+  const fc=(item)=>{
+    if(!item||item.changePct==null)return'';
+    const s=item.changePct>=0?'+':'';
+    return ' ['+s+item.changePct.toFixed(2)+'%]';
+  };
   const l=[
     '📊 实时财经数据看板',
     '🕐 '+new Date().toLocaleString('zh-CN'),
     '━━━━━━━━━━━━━━',
-    '🛢️ WTI原油: '+f((lastData.oil||{}).price)+' ['+((lastData.oil||{}).changePct!=null?((lastData.oil.changePct>=0?'+':'')+lastData.oil.changePct.toFixed(2)+'%'):'--')+']',
+    '🛢️ WTI原油: '+f((lastData.oil||{}).price)+fc(lastData.oil),
     '🥇 黄金: '+f((lastData.gold||{}).price),
-    '💵 美元指数: '+f((lastData.dxy||{}).price),
-    '🇨🇳 离岸人民币: '+f((lastData.cnh||{}).price),
+    '💵 美元指数: '+f((lastData.dxy||{}).price)+fc(lastData.dxy),
+    '🇨🇳 离岸人民币: '+f((lastData.cnh||{}).price,4)+fc(lastData.cnh),
     '🇺🇸 美10年国债: '+f((lastData.us10y||{}).yield,3)+'%',
     '🇺🇸 美30年国债: '+f((lastData.us30y||{}).yield,3)+'%',
     '🇨🇳 中国10年国债: '+f((lastData.cn10y||{}).yield,3)+'%',
@@ -444,6 +507,9 @@ function openShare(){
   btnImage.textContent='🖼️ 生成分享图片';
   shareOverlay.classList.add('active');
   btnCopy.textContent='📋 复制文本';btnCopy.classList.remove('copied');
+  // 清除之前的图片点击事件
+  shareImage.onclick=null;
+  shareImage.style.cursor='default';
 }
 function closeShare(e){if(e.target===shareOverlay)shareOverlay.classList.remove('active');}
 function closeShareDirect(){shareOverlay.classList.remove('active');}
@@ -468,149 +534,153 @@ async function copyShareText(){
 function generateShareImage(){
   if(!lastData){showToast('请先加载数据');return;}
   btnImage.textContent='⏳ 生成中...';
-  setTimeout(()=>{
-    try{
-      const canvas=shareCanvas;
-      const ctx=canvas.getContext('2d');
-      const W=600,H=900;
+  try{
+    const canvas=shareCanvas;
+    const ctx=canvas.getContext('2d');
+    const W=600,H=900;
 
-      // Background
-      ctx.fillStyle='#0f1923';
-      ctx.fillRect(0,0,W,H);
+    // Background
+    ctx.fillStyle='#0f1923';
+    ctx.fillRect(0,0,W,H);
 
-      // Header
-      ctx.fillStyle='#e8edf2';
-      ctx.font='bold 32px -apple-system,PingFang SC,Microsoft YaHei,sans-serif';
-      ctx.fillText('📊 实时财经数据看板',30,60);
+    // Header
+    ctx.fillStyle='#e8edf2';
+    ctx.font='bold 32px -apple-system,PingFang SC,Microsoft YaHei,sans-serif';
+    ctx.fillText('📊 实时财经数据看板',30,60);
 
+    ctx.fillStyle='#8ba4bc';
+    ctx.font='16px monospace';
+    const dt=new Date().toLocaleString('zh-CN');
+    ctx.fillText(dt,30,90);
+
+    // Divider
+    ctx.strokeStyle='#263b4e';
+    ctx.lineWidth=1;
+    ctx.beginPath();ctx.moveTo(30,110);ctx.lineTo(W-30,110);ctx.stroke();
+
+    // Data rows — 所有项目显示变化
+    const items=[
+      {label:'🛢️ WTI原油',val:lastData.oil||{},fmt:'price',unit:' USD/桶',dec:2},
+      {label:'🥇 黄金',val:lastData.gold||{},fmt:'price',unit:' USD/盎司',dec:2},
+      {label:'💵 美元指数',val:lastData.dxy||{},fmt:'price',unit:'',dec:2},
+      {label:'🇨🇳 离岸人民币',val:lastData.cnh||{},fmt:'price',unit:'',dec:4},
+      {label:'🇺🇸 美10年国债',val:lastData.us10y||{},fmt:'yield',unit:'%',dec:3},
+      {label:'🇺🇸 美30年国债',val:lastData.us30y||{},fmt:'yield',unit:'%',dec:3},
+      {label:'🇨🇳 中国10年国债',val:lastData.cn10y||{},fmt:'yield',unit:'%',dec:3},
+      {label:'🇨🇳 中国30年国债',val:lastData.cn30y||{},fmt:'yield',unit:'%',dec:3},
+    ];
+
+    let y=150;
+    items.forEach(item=>{
+      const v=item.val[item.fmt];
+      const valStr=v!=null?v.toFixed(item.dec):'--';
+      const hasChange=item.val.changePct!=null||item.val.change!=null;
+
+      // Background card
+      ctx.fillStyle='#1a2d3d';
+      const cr=10;
+      ctx.beginPath();ctx.moveTo(30+cr,y);ctx.lineTo(W-30-cr,y);
+      ctx.quadraticCurveTo(W-30,y,W-30,y+cr);
+      ctx.lineTo(W-30,y+70-cr);
+      ctx.quadraticCurveTo(W-30,y+70,W-30-cr,y+70);
+      ctx.lineTo(30+cr,y+70);
+      ctx.quadraticCurveTo(30,y+70,30,y+70-cr);
+      ctx.lineTo(30,y+cr);
+      ctx.quadraticCurveTo(30,y,30+cr,y);
+      ctx.fill();
+
+      // Top color bar
+      ctx.fillStyle='#4da6ff';
+      ctx.beginPath();ctx.moveTo(30+cr,y);ctx.lineTo(W-30-cr,y);
+      ctx.quadraticCurveTo(W-30,y,W-30,y+cr);
+      ctx.lineTo(W-30,y+3);ctx.lineTo(30,y+3);ctx.lineTo(30,y+cr);
+      ctx.quadraticCurveTo(30,y,30+cr,y);
+      ctx.fill();
+
+      // Label
       ctx.fillStyle='#8ba4bc';
-      ctx.font='16px monospace';
-      const dt=new Date().toLocaleString('zh-CN');
-      ctx.fillText(dt,30,90);
+      ctx.font='13px -apple-system,PingFang SC,sans-serif';
+      ctx.fillText(item.label,46,y+28);
 
-      // Divider
-      ctx.strokeStyle='#263b4e';
-      ctx.lineWidth=1;
-      ctx.beginPath();ctx.moveTo(30,110);ctx.lineTo(W-30,110);ctx.stroke();
+      // Value
+      ctx.fillStyle='#e8edf2';
+      ctx.font='bold 30px monospace';
+      ctx.fillText(valStr+item.unit,46,y+60);
 
-      // Data rows
-      const items=[
-        {label:'🛢️ WTI原油',val:lastData.oil||{},fmt:'price',unit:' USD/桶',dec:2,chg:true},
-        {label:'🥇 黄金',val:lastData.gold||{},fmt:'price',unit:' USD/盎司',dec:2,chg:false},
-        {label:'💵 美元指数',val:lastData.dxy||{},fmt:'price',unit:'',dec:2,chg:false},
-        {label:'🇨🇳 离岸人民币',val:lastData.cnh||{},fmt:'price',unit:'',dec:4,chg:false},
-        {label:'🇺🇸 美10年国债',val:lastData.us10y||{},fmt:'yield',unit:'%',dec:3,chg:false},
-        {label:'🇺🇸 美30年国债',val:lastData.us30y||{},fmt:'yield',unit:'%',dec:3,chg:false},
-        {label:'🇨🇳 中国10年国债',val:lastData.cn10y||{},fmt:'yield',unit:'%',dec:3,chg:false},
-        {label:'🇨🇳 中国30年国债',val:lastData.cn30y||{},fmt:'yield',unit:'%',dec:3,chg:false},
-      ];
-
-      let y=150;
-      items.forEach(item=>{
-        const v=item.val[item.fmt];
-        const valStr=v!=null?v.toFixed(item.dec):'--';
-
-        // Background card
-        ctx.fillStyle='#1a2d3d';
-        const cr=10;
-        ctx.beginPath();ctx.moveTo(30+cr,y);ctx.lineTo(W-30-cr,y);
-        ctx.quadraticCurveTo(W-30,y,W-30,y+cr);
-        ctx.lineTo(W-30,y+70-cr);
-        ctx.quadraticCurveTo(W-30,y+70,W-30-cr,y+70);
-        ctx.lineTo(30+cr,y+70);
-        ctx.quadraticCurveTo(30,y+70,30,y+70-cr);
-        ctx.lineTo(30,y+cr);
-        ctx.quadraticCurveTo(30,y,30+cr,y);
-        ctx.fill();
-
-        // Top color bar
-        ctx.fillStyle=item.chg?'#ff8c42':'#4da6ff';
-        ctx.beginPath();ctx.moveTo(30+cr,y);ctx.lineTo(W-30-cr,y);
-        ctx.quadraticCurveTo(W-30,y,W-30,y+cr);
-        ctx.lineTo(W-30,y+3);ctx.lineTo(30,y+3);ctx.lineTo(30,y+cr);
-        ctx.quadraticCurveTo(30,y,30+cr,y);
-        ctx.fill();
-
-        // Label
-        ctx.fillStyle='#8ba4bc';
-        ctx.font='13px -apple-system,PingFang SC,sans-serif';
-        ctx.fillText(item.label,46,y+28);
-
-        // Value
-        ctx.fillStyle='#e8edf2';
-        ctx.font='bold 30px monospace';
-        ctx.fillText(valStr+item.unit,46,y+60);
-
-        // Change
-        if(item.chg&&item.val.changePct!=null){
-          const cp=item.val.changePct;
-          const cText=(cp>=0?'+':'')+cp.toFixed(2)+'%';
-          ctx.fillStyle=cp>=0?'#00d4aa':'#ff4d6a';
+      // Change (所有有变化数据的项目都显示)
+      if(hasChange){
+        const cp=item.val.changePct;
+        const c=item.val.change;
+        let cText='';
+        if(cp!=null){cText=(cp>=0?'+':'')+cp.toFixed(2)+'%';}
+        else if(c!=null){cText=(c>=0?'+':'')+c.toFixed(2);}
+        if(cText){
+          const isUp=(cp!=null?cp:c)>=0;
+          ctx.fillStyle=isUp?'#00d4aa':'#ff4d6a';
           ctx.font='bold 18px monospace';
           ctx.fillText(cText,W-180,y+60);
         }
-
-        y+=84;
-      });
-
-      // FedWatch section
-      const fed=lastData.fedwatch||{};
-      if(fed.currentRate){
-        ctx.fillStyle='#1a2d3d';
-        ctx.beginPath();ctx.moveTo(30+cr,y);ctx.lineTo(W-30-cr,y);
-        ctx.quadraticCurveTo(W-30,y,W-30,y+cr);
-        ctx.lineTo(W-30,y+100-cr);
-        ctx.quadraticCurveTo(W-30,y+100,W-30-cr,y+100);
-        ctx.lineTo(30+cr,y+100);
-        ctx.quadraticCurveTo(30,y+100,30,y+100-cr);
-        ctx.lineTo(30,y+cr);
-        ctx.quadraticCurveTo(30,y,30+cr,y);
-        ctx.fill();
-
-        ctx.fillStyle='#8ba4bc';
-        ctx.font='13px monospace';
-        ctx.fillText('🏛️ 美联储利率预期 | '+fed.meetingDate,46,y+25);
-
-        ctx.fillStyle='#e8edf2';
-        ctx.font='bold 16px monospace';
-        ctx.fillText('当前利率: '+fed.currentRate,46,y+50);
-
-        (fed.meetings||[]).forEach((m,i)=>{
-          ctx.fillStyle='#8ba4bc';
-          ctx.font='13px monospace';
-          ctx.fillText(m.rate,46,y+75+i*22);
-          ctx.fillStyle='#e8edf2';
-          ctx.fillText((m.probability||0).toFixed(1)+'%',W-100,y+75+i*22);
-        });
       }
 
-      // Footer
-      ctx.fillStyle='#5a7a94';
-      ctx.font='11px monospace';
-      ctx.fillText('数据仅供参考 | 财经数据看板',30,H-30);
+      y+=84;
+    });
 
-      // Show image
-      const dataUrl=canvas.toDataURL('image/png');
-      shareImage.src=dataUrl;
-      shareImageWrap.classList.add('show');
-      sharePreview.style.display='none';
-      btnImage.textContent='✅ 图片已生成';
-      showToast('图片已生成！长按保存或分享');
+    // FedWatch section
+    const fed=lastData.fedwatch||{};
+    if(fed.currentRate){
+      ctx.fillStyle='#1a2d3d';
+      ctx.beginPath();ctx.moveTo(30+cr,y);ctx.lineTo(W-30-cr,y);
+      ctx.quadraticCurveTo(W-30,y,W-30,y+cr);
+      ctx.lineTo(W-30,y+100-cr);
+      ctx.quadraticCurveTo(W-30,y+100,W-30-cr,y+100);
+      ctx.lineTo(30+cr,y+100);
+      ctx.quadraticCurveTo(30,y+100,30,y+100-cr);
+      ctx.lineTo(30,y+cr);
+      ctx.quadraticCurveTo(30,y,30+cr,y);
+      ctx.fill();
 
-      // Also copy to clipboard if possible
-      try{
-        canvas.toBlob(blob=>{
-          const item=new ClipboardItem({'image/png':blob});
-          navigator.clipboard.write([item]).then(()=>{
-            showToast('✅ 图片已复制到剪贴板！可直接粘贴到微信');
-          }).catch(()=>{});
-        });
-      }catch(e){}
-    }catch(e){
-      showToast('生成失败: '+e.message);
-      btnImage.textContent='🖼️ 生成分享图片';
+      ctx.fillStyle='#8ba4bc';
+      ctx.font='13px monospace';
+      ctx.fillText('🏛️ 美联储利率预期 | '+fed.meetingDate,46,y+25);
+
+      ctx.fillStyle='#e8edf2';
+      ctx.font='bold 16px monospace';
+      ctx.fillText('当前利率: '+fed.currentRate,46,y+50);
+
+      (fed.meetings||[]).forEach((m,i)=>{
+        ctx.fillStyle='#8ba4bc';
+        ctx.font='13px monospace';
+        ctx.fillText(m.rate,46,y+75+i*22);
+        ctx.fillStyle='#e8edf2';
+        ctx.fillText((m.probability||0).toFixed(1)+'%',W-100,y+75+i*22);
+      });
     }
-  },100);
+
+    // Footer
+    ctx.fillStyle='#5a7a94';
+    ctx.font='11px monospace';
+    ctx.fillText('数据仅供参考 | 财经数据看板',30,H-30);
+
+    // Generate and display image
+    const dataUrl=canvas.toDataURL('image/png');
+    shareImage.src=dataUrl;
+    shareImageWrap.classList.add('show');
+    sharePreview.style.display='none';
+    btnImage.textContent='⬇️ 下载/长按保存';
+    showToast('✅ 图片已生成！长按图片保存或截图分享');
+
+    // 方案: 直接触发下载 (更可靠)
+    shareImage.onclick=function(){
+      const a=document.createElement('a');
+      a.href=dataUrl;
+      a.download='财经数据看板_'+new Date().toISOString().slice(0,10)+'.png';
+      a.click();
+    };
+    shareImage.style.cursor='pointer';
+  }catch(e){
+    showToast('生成失败: '+e.message);
+    btnImage.textContent='🖼️ 生成分享图片';
+  }
 }
 
 function showToast(msg){
@@ -629,3 +699,4 @@ init();
 </script>
 </body>
 </html>
+
