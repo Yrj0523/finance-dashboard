@@ -262,70 +262,99 @@ async function fetchData(){
 async function fetchAllData(){
   const results = {};
 
-  // 1. 黄金
-  try{
-    const r=await fetch('https://api.gold-api.com/price/XAU');
-    const d=await r.json();
-    results.gold={name:'gold',symbol:'XAU',price:d.price,source:'gold-api.com',updated:ts()};
-  }catch(e){results.gold={name:'gold',price:null,error:e.message,source:'gold-api',updated:ts()};}
-
-  // 2. 汇率 + 昨日数据 (并行获取计算变化)
+  // ========== 统一数据获取: currency-api ==========
+  // 问题: currency-api 周末不更新, @latest 和 @yesterday 可能返回同一天数据
+  // 方案: 获取今日数据后, 向前遍历找与今日日期不同的最近有效交易日
+  let todayData=null, prevData=null;
   const todayDate = new Date();
-  const yesterdayStr = (()=>{
-    const d=new Date(todayDate);
-    d.setDate(d.getDate()-1);
-    return d.toISOString().slice(0,10);
-  })();
   try{
-    const [todayR,yesterdayR] = await Promise.all([
-      fetch('https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.min.json'),
-      fetch('https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@'+yesterdayStr+'/v1/currencies/usd.min.json')
-    ]);
-    const td=await todayR.json();
-    const yd=await yesterdayR.json();
-    const rates=td.usd||{};
-    const prevRates=yd.usd||{};
-    results._rates=rates;results._date=td.date||'';
+    // 获取今日数据
+    const todayR=await fetch('https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.min.json');
+    todayData=await todayR.json();
+    const todayRates=todayData.usd||{};
+    results._rates=todayRates;
+    results._date=todayData.date||'';
 
-    // CNH
-    const cnhPrice=r4(rates.cnh);
-    const cnhPrev=r4(prevRates.cnh);
+    // 向前遍历找前一个有效交易日 (最多5天, 且数据日期必须与今日不同)
+    for(let i=1; i<=5; i++){
+      const d=new Date(todayDate);
+      d.setDate(d.getDate()-i);
+      const ds=d.toISOString().slice(0,10);
+      try{
+        const prevR=await fetch('https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@'+ds+'/v1/currencies/usd.min.json');
+        if(prevR.ok){
+          const pd=await prevR.json();
+          if(pd.date && pd.date !== todayData.date){
+            prevData=pd;
+            break;
+          }
+        }
+      }catch(e){ continue; }
+    }
+    const prevRates=(prevData||{}).usd||{};
+    results._prevRates=prevRates;
+    results._prevDate=(prevData||{}).date||'';
+
+    // --- 黄金: 从 currency-api 的 xau 字段计算 (1/xau = USD per oz) ---
+    if(todayRates.xau && todayRates.xau > 0){
+      const goldPrice=r2(1.0/todayRates.xau);
+      let goldPrev=null, goldChange=null, goldChangePct=null;
+      if(prevRates.xau && prevRates.xau > 0){
+        goldPrev=r2(1.0/prevRates.xau);
+        goldChange=goldPrice&&goldPrev?r2(goldPrice-goldPrev):null;
+        goldChangePct=goldPrice&&goldPrev?r2((goldPrice-goldPrev)/goldPrev*100):null;
+      }
+      results.gold={
+        name:'gold', symbol:'XAU', price:goldPrice, prevClose:goldPrev,
+        change:goldChange, changePct:goldChangePct,
+        source:'currency-api('+todayData.date+')', updated:ts()
+      };
+    }else{
+      results.gold={name:'gold',price:null,error:'XAU数据缺失',source:'currency-api',updated:ts()};
+    }
+
+    // --- CNH ---
+    const cnhPrice=r4(todayRates.cnh);
+    const cnhPrev=prevRates.cnh ? r4(prevRates.cnh) : null;
     const cnhChange=cnhPrice&&cnhPrev?r4(cnhPrice-cnhPrev):null;
     const cnhChangePct=cnhPrice&&cnhPrev?r2((cnhPrice-cnhPrev)/cnhPrev*100):null;
-    results.cnh={name:'cnh',symbol:'USDCNH',price:cnhPrice,prevClose:cnhPrev,change:cnhChange,changePct:cnhChangePct,source:'currency-api',updated:ts()};
+    results.cnh={
+      name:'cnh', symbol:'USDCNH', price:cnhPrice, prevClose:cnhPrev,
+      change:cnhChange, changePct:cnhChangePct,
+      source:'currency-api', updated:ts()
+    };
 
-    // DXY
-    results._prevRates=prevRates;
-  }catch(e){
-    // 降级：至少获取当日汇率
-    try{
-      const r=await fetch('https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.min.json');
-      const d=await r.json();
-      const rates=d.usd||{};
-      results._rates=rates;results._date=d.date||'';
-      results.cnh={name:'cnh',symbol:'USDCNH',price:r4(rates.cnh),source:'currency-api',updated:ts()};
-    }catch(e2){results.cnh={name:'cnh',price:null,error:e2.message,source:'currency-api',updated:ts()};}
-  }
-
-  // 3. DXY (含昨日变化)
-  try{
-    const r=results._rates;
-    const pr=results._prevRates||{};
-    if(r&&r.eur&&r.jpy&&r.gbp&&r.cad&&r.sek&&r.chf){
+    // --- DXY ---
+    if(todayRates.eur&&todayRates.jpy&&todayRates.gbp&&todayRates.cad&&todayRates.sek&&todayRates.chf){
       const calcDxy=(rates)=>{
-        const eu=1.0/rates.eur,gu=1.0/rates.gbp;
+        const eu=1.0/rates.eur, gu=1.0/rates.gbp;
         return 50.14348112*Math.pow(eu,-0.576)*Math.pow(rates.jpy,0.136)*Math.pow(gu,-0.119)*Math.pow(rates.cad,0.091)*Math.pow(rates.sek,0.042)*Math.pow(rates.chf,0.036);
       };
-      const dxyPrice=r4(calcDxy(r));
-      let dxyPrev=null,dxyChange=null,dxyChangePct=null;
-      if(pr.eur&&pr.jpy&&pr.gbp&&pr.cad&&pr.sek&&pr.chf){
-        dxyPrev=r4(calcDxy(pr));
+      const dxyPrice=r4(calcDxy(todayRates));
+      let dxyPrev=null, dxyChange=null, dxyChangePct=null;
+      if(prevRates.eur&&prevRates.jpy&&prevRates.gbp&&prevRates.cad&&prevRates.sek&&prevRates.chf){
+        dxyPrev=r4(calcDxy(prevRates));
         dxyChange=dxyPrice&&dxyPrev?r4(dxyPrice-dxyPrev):null;
         dxyChangePct=dxyPrice&&dxyPrev?r2((dxyPrice-dxyPrev)/dxyPrev*100):null;
       }
-      results.dxy={name:'dxy',symbol:'DXY',price:dxyPrice,prevClose:dxyPrev,change:dxyChange,changePct:dxyChangePct,source:'公式估算',updated:ts()};
-    }else{results.dxy={name:'dxy',price:null,error:'汇率数据不足',source:'fallback',updated:ts()};}
-  }catch(e){results.dxy={name:'dxy',price:null,error:e.message,source:'fallback',updated:ts()};}
+      results.dxy={
+        name:'dxy', symbol:'DXY', price:dxyPrice, prevClose:dxyPrev,
+        change:dxyChange, changePct:dxyChangePct,
+        source:'公式估算', updated:ts()
+      };
+    }else{
+      results.dxy={name:'dxy',price:null,error:'汇率数据不足',source:'fallback',updated:ts()};
+    }
+  }catch(e){
+    // 降级: gold-api 作为黄金备选 (无涨跌幅)
+    try{
+      const gr=await fetch('https://api.gold-api.com/price/XAU');
+      const gd=await gr.json();
+      results.gold={name:'gold',symbol:'XAU',price:gd.price,source:'gold-api.com',updated:ts()};
+    }catch(e2){results.gold={name:'gold',price:null,error:e2.message,source:'gold-api',updated:ts()};}
+    results.cnh={name:'cnh',price:null,error:e.message,source:'currency-api',updated:ts()};
+    results.dxy={name:'dxy',price:null,error:e.message,source:'fallback',updated:ts()};
+  }
 
   // 4. 原油 - WTI (新浪 hf_OIL)
   results.oil = await fetchSinaOil();
