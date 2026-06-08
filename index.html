@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="财经看板">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#0f1923">
+<meta name="description" content="实时财经数据看板 - 石油、黄金、美元指数、汇率、国债利率、美联储概率">
+<title>📊 财经看板</title>
+<link rel="manifest" href="data:application/json;base64,ewogICJuYW1lIjogIui0ouWkseaVsOaNrueci+mdoCIsCiAgInNob3J0X25hbWUiOiAi6LSi57uP55yL5p2/IiwKICAic3RhcnRfdXJsIjogIi4iLAogICJkaXNwbGF5IjogInN0YW5kYWxvbmUiLAogICJvcmllbnRhdGlvbiI6ICJwb3J0cmFpdCIsCiAgImJhY2tncm91bmRfY29sb3IiOiAiIzBmMTkyMyIsCiAgInRoZW1lX2NvbG9yIjogIiMwZjE5MjMiLAogICJpY29ucyI6IFtdCn0=">
+<link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='192' height='192'><rect fill='%230f1923' width='192' height='192' rx='32'/><text x='96' y='120' text-anchor='middle' font-size='80'>📊</text></svg>">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg-primary:#0f1923;--bg-secondary:#152230;--bg-card:#1a2d3d;--bg-card-hover:#1f3548;
+  --border:#263b4e;--text-primary:#e8edf2;--text-secondary:#8ba4bc;--text-muted:#5a7a94;
+  --accent-green:#00d4aa;--accent-red:#ff4d6a;--accent-blue:#4da6ff;--accent-gold:#f0b90b;--accent-oil:#ff8c42;
+  --shadow:0 2px 12px rgba(0,0,0,0.3);--radius:12px;--radius-sm:8px;
+  --font-mono:'SF Mono','Cascadia Code','Consolas','Monaco',monospace;
+  --font-sans:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;
+  --safe-bottom:env(safe-area-inset-bottom,16px);
+}
+html{font-size:14px;font-family:var(--font-sans);background:var(--bg-primary);color:var(--text-primary);-webkit-font-smoothing:antialiased}
+body{min-height:100vh;min-height:100dvh;padding-bottom:calc(80px + var(--safe-bottom));overflow-x:hidden}
+.header{position:sticky;top:0;z-index:100;background:linear-gradient(180deg,var(--bg-primary) 80%,transparent);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);padding:16px 16px 12px;display:flex;align-items:center;justify-content:space-between}
+.header-left{display:flex;align-items:center;gap:8px}
+.header-logo{font-size:22px}
+.header-title{font-size:17px;font-weight:700;letter-spacing:-0.3px}
+.header-time{font-size:12px;color:var(--text-secondary);margin-top:2px}
+.header-right{display:flex;align-items:center;gap:8px}
+.btn-icon{width:36px;height:36px;border-radius:50%;border:1px solid var(--border);background:var(--bg-card);color:var(--text-primary);font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all 0.2s;-webkit-tap-highlight-color:transparent}
+.btn-icon:active{background:var(--bg-card-hover);transform:scale(0.95)}
+.btn-icon.spinning svg{animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.status-bar{display:flex;align-items:center;justify-content:space-between;padding:0 16px 12px}
+.status-left{display:flex;align-items:center;gap:6px}
+.status-dot{width:8px;height:8px;border-radius:50%}
+.status-dot.live{background:var(--accent-green);box-shadow:0 0 8px rgba(0,212,170,0.5);animation:pulse 2s infinite}
+.status-dot.stale{background:var(--accent-gold)}
+.status-dot.error{background:var(--accent-red)}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
+.status-text{font-size:12px;color:var(--text-secondary)}
+.status-refresh{font-size:12px;color:var(--text-muted)}
+.refresh-selector{display:flex;align-items:center;gap:6px;padding:0 16px 12px}
+.refresh-selector span{font-size:12px;color:var(--text-muted);white-space:nowrap}
+.refresh-options{display:flex;gap:4px}
+.refresh-opt{padding:4px 12px;border-radius:16px;border:1px solid var(--border);background:transparent;color:var(--text-secondary);font-size:12px;cursor:pointer;transition:all 0.2s;white-space:nowrap;-webkit-tap-highlight-color:transparent}
+.refresh-opt:active{transform:scale(0.95)}
+.refresh-opt.active{background:var(--accent-blue);border-color:var(--accent-blue);color:#fff;font-weight:600}
+.data-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:0 12px}
+.card{background:var(--bg-card);border-radius:var(--radius);padding:14px;position:relative;overflow:hidden;border:1px solid transparent;transition:all 0.3s;box-shadow:var(--shadow)}
+.card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;border-radius:var(--radius) var(--radius) 0 0}
+.card.full-width{grid-column:1/-1}
+.card:active{transform:scale(0.98)}
+.card-error{border-color:rgba(255,77,106,0.25)}
+.card-category{font-size:10px;text-transform:uppercase;letter-spacing:1.5px;color:var(--text-muted);margin-bottom:4px}
+.card-name{font-size:12px;color:var(--text-secondary);margin-bottom:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.card-price{font-size:26px;font-weight:800;font-family:var(--font-mono);letter-spacing:-1px;line-height:1.1}
+.card-change{display:flex;align-items:center;gap:4px;margin-top:4px;font-size:13px;font-family:var(--font-mono)}
+.card-change.up{color:var(--accent-green)}
+.card-change.down{color:var(--accent-red)}
+.card-change.neutral{color:var(--text-secondary)}
+.card-detail{font-size:11px;color:var(--text-muted);margin-top:6px;display:flex;flex-wrap:wrap;gap:8px}
+.card-source{position:absolute;top:10px;right:12px;font-size:9px;color:var(--text-muted);opacity:0.4}
+.card-oil::before{background:var(--accent-oil)}
+.card-gold::before{background:var(--accent-gold)}
+.card-dxy::before{background:var(--accent-blue)}
+.card-cnh::before{background:var(--accent-green)}
+.card-bond::before{background:var(--accent-blue)}
+.card-fed::before{background:linear-gradient(90deg,var(--accent-blue),var(--accent-green))}
+.fed-bar-wrap{margin-top:8px}
+.fed-bar-label{display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px;color:var(--text-secondary)}
+.fed-bar-label .prob{font-weight:700;font-family:var(--font-mono)}
+.fed-bar-track{height:8px;background:var(--bg-secondary);border-radius:4px;overflow:hidden}
+.fed-bar-fill{height:100%;border-radius:4px;transition:width 0.6s ease}
+.fed-bar-fill.dovish{background:var(--accent-green)}
+.fed-bar-fill.hawkish{background:var(--accent-red)}
+.fed-bar-fill.neutral{background:var(--accent-gold)}
+.fed-current{font-size:12px;color:var(--text-muted);margin-top:6px;display:flex;justify-content:space-between}
+.share-overlay{position:fixed;inset:0;z-index:999;background:rgba(0,0,0,0.7);display:flex;align-items:flex-end;justify-content:center;opacity:0;pointer-events:none;transition:opacity 0.3s}
+.share-overlay.active{opacity:1;pointer-events:auto}
+.share-panel{background:var(--bg-secondary);border-radius:20px 20px 0 0;padding:20px 16px calc(24px + var(--safe-bottom));width:100%;max-width:500px;transform:translateY(100%);transition:transform 0.3s}
+.share-overlay.active .share-panel{transform:translateY(0)}
+.share-handle{width:36px;height:4px;background:var(--border);border-radius:2px;margin:0 auto 16px}
+.share-title{font-size:16px;font-weight:700;text-align:center;margin-bottom:16px}
+.share-buttons{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.share-btn{display:flex;align-items:center;justify-content:center;gap:8px;padding:14px;border-radius:var(--radius-sm);border:none;font-size:15px;font-weight:600;cursor:pointer;color:#fff;transition:all 0.2s;-webkit-tap-highlight-color:transparent}
+.share-btn:active{transform:scale(0.96)}
+.share-btn.wechat{background:#07c160}
+.share-btn.moments{background:#2b7b4e}
+.share-btn.copy{background:var(--bg-card);border:1px solid var(--border);grid-column:1/-1;color:var(--text-primary)}
+.share-btn.copy.copied{background:var(--accent-green);border-color:var(--accent-green)}
+.share-preview{background:var(--bg-primary);border-radius:var(--radius-sm);padding:12px;margin-bottom:16px;max-height:150px;overflow-y:auto;font-size:12px;color:var(--text-secondary);font-family:var(--font-mono);white-space:pre-wrap;word-break:break-all;line-height:1.6}
+.share-cancel{display:block;width:100%;margin-top:10px;padding:12px;background:transparent;border:none;color:var(--text-muted);font-size:14px;cursor:pointer}
+.toast{position:fixed;top:80px;left:50%;transform:translateX(-50%);z-index:1000;background:var(--bg-card);color:var(--text-primary);border:1px solid var(--border);padding:10px 20px;border-radius:20px;font-size:13px;opacity:0;transition:opacity 0.3s;pointer-events:none;white-space:nowrap}
+.toast.show{opacity:1}
+.footer{position:fixed;bottom:0;left:0;right:0;z-index:50;padding:12px 16px calc(12px + var(--safe-bottom));display:flex;justify-content:center;font-size:10px;color:var(--text-muted)}
+@media(min-width:600px){.data-grid{grid-template-columns:repeat(3,1fr);max-width:960px;margin:0 auto}.card-price{font-size:28px}}
+@media(min-width:900px){.data-grid{grid-template-columns:repeat(4,1fr)}}
+.skeleton{background:linear-gradient(90deg,var(--bg-card) 25%,var(--bg-card-hover) 50%,var(--bg-card) 75%);background-size:200% 100%;animation:shimmer 1.5s infinite;border-radius:4px}
+@keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
+.skel-price{height:28px;width:80%;margin:8px 0}
+.skel-change{height:16px;width:50%}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-left">
+    <span class="header-logo">📊</span>
+    <div>
+      <div class="header-title">财经数据看板</div>
+      <div class="header-time" id="headerTime">加载中...</div>
+    </div>
+  </div>
+  <div class="header-right">
+    <button class="btn-icon" id="btnShare" title="分享" onclick="openShare()">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+    </button>
+    <button class="btn-icon" id="btnRefresh" title="手动刷新" onclick="manualRefresh()">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+    </button>
+  </div>
+</div>
+
+<div class="status-bar">
+  <div class="status-left">
+    <div class="status-dot" id="statusDot"></div>
+    <span class="status-text" id="statusText">初始化...</span>
+  </div>
+  <span class="status-refresh" id="statusRefresh">--</span>
+</div>
+
+<div class="refresh-selector">
+  <span>⏱ 自动刷新:</span>
+  <div class="refresh-options" id="refreshOptions">
+    <button class="refresh-opt" data-interval="15">15秒</button>
+    <button class="refresh-opt" data-interval="30">30秒</button>
+    <button class="refresh-opt active" data-interval="60">60秒</button>
+    <button class="refresh-opt" data-interval="120">2分钟</button>
+    <button class="refresh-opt" data-interval="0">关闭</button>
+  </div>
+</div>
+
+<div class="data-grid" id="dataGrid"></div>
+
+<div class="share-overlay" id="shareOverlay" onclick="closeShare(event)">
+  <div class="share-panel" onclick="event.stopPropagation()">
+    <div class="share-handle"></div>
+    <div class="share-title">📤 分享财经数据</div>
+    <div class="share-preview" id="sharePreview"></div>
+    <div class="share-buttons">
+      <button class="share-btn wechat" onclick="shareTo('wechat')">💬 微信好友</button>
+      <button class="share-btn moments" onclick="shareTo('moments')">🟢 朋友圈</button>
+      <button class="share-btn copy" id="btnCopy" onclick="copyShareText()">📋 复制文本</button>
+    </div>
+    <button class="share-cancel" onclick="closeShareDirect()">取消</button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+<div class="footer">数据来源: gold-api · 新浪财经 · currency-api · CME · 仅供参考</div>
+
+<script>
+// ==================== STATE ====================
+let autoRefreshInterval = 60;
+let refreshTimer = null;
+let isRefreshing = false;
+let lastData = null;
+
+// ==================== DOM ====================
+const $ = id => document.getElementById(id);
+const dataGrid = $('dataGrid');
+const statusDot = $('statusDot');
+const statusText = $('statusText');
+const statusRefresh = $('statusRefresh');
+const headerTime = $('headerTime');
+const btnRefresh = $('btnRefresh');
+const toast = $('toast');
+const shareOverlay = $('shareOverlay');
+const sharePreview = $('sharePreview');
+const btnCopy = $('btnCopy');
+
+// ==================== HELPERS ====================
+function r4(v){return v?Math.round(v*10000)/10000:null}
+function r2(v){return v?Math.round(v*100)/100:null}
+function ts(){return new Date().toLocaleTimeString('zh-CN',{hour12:false})}
+
+// ==================== INIT ====================
+function init(){
+  updateClock();
+  setInterval(updateClock,1000);
+  setupRefresh();
+  showSkeleton();
+  fetchData();
+  startAutoRefresh();
+}
+
+function updateClock(){
+  headerTime.textContent = new Date().toLocaleString('zh-CN',{
+    year:'numeric',month:'2-digit',day:'2-digit',
+    hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false
+  });
+}
+
+function setupRefresh(){
+  document.querySelectorAll('.refresh-opt').forEach(btn=>{
+    btn.addEventListener('click',()=>{
+      document.querySelectorAll('.refresh-opt').forEach(b=>b.classList.remove('active'));
+      btn.classList.add('active');
+      autoRefreshInterval=parseInt(btn.dataset.interval);
+      startAutoRefresh();
+      showToast(autoRefreshInterval===0?'自动刷新已关闭':'⏱ 刷新频率: '+autoRefreshInterval+'秒');
+    });
+  });
+}
+
+function startAutoRefresh(){
+  if(refreshTimer)clearInterval(refreshTimer);
+  if(autoRefreshInterval>0)refreshTimer=setInterval(fetchData,autoRefreshInterval*1000);
+}
+
+function setStatus(s){
+  statusDot.className='status-dot';
+  if(s==='live'){statusDot.classList.add('live');statusText.textContent='实时';}
+  else if(s==='loading'){statusDot.classList.add('stale');statusText.textContent='刷新中...';}
+  else{statusDot.classList.add('error');statusText.textContent='连接异常';}
+}
+
+async function manualRefresh(){
+  if(isRefreshing)return;
+  btnRefresh.classList.add('spinning');
+  await fetchData();
+  setTimeout(()=>btnRefresh.classList.remove('spinning'),600);
+}
+
+// ==================== DATA FETCHING ====================
+async function fetchData(){
+  if(isRefreshing)return;
+  isRefreshing=true;
+  setStatus('loading');
+
+  try{
+    const data = await fetchAllData();
+    lastData = data;
+    renderAll(data);
+    setStatus('live');
+    statusRefresh.textContent='更新于 '+data._time;
+    updateClock();
+  }catch(e){
+    console.error(e);
+    setStatus('error');
+    statusRefresh.textContent='获取失败';
+    if(!lastData)showSkeleton();
+  }finally{
+    isRefreshing=false;
+  }
+}
+
+async function fetchAllData(){
+  const results = {};
+
+  // 1. 黄金 — api.gold-api.com
+  try{
+    const r=await fetch('https://api.gold-api.com/price/XAU');
+    const d=await r.json();
+    results.gold={name:'gold',symbol:'XAU',price:d.price,source:'gold-api.com',updated:ts()};
+  }catch(e){
+    results.gold={name:'gold',price:null,error:e.message,source:'gold-api',updated:ts()};
+  }
+
+  // 2. 汇率 — currency-api (jsDelivr CDN)
+  try{
+    const r=await fetch('https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.json');
+    const d=await r.json();
+    const rates=d.usd||{};
+    results.cnh={name:'cnh',symbol:'USDCNH',price:r4(rates.cnh),source:'currency-api',updated:ts()};
+    results._rates=rates;
+  }catch(e){
+    results.cnh={name:'cnh',price:null,error:e.message,source:'currency-api',updated:ts()};
+  }
+
+  // 3. DXY — 公式计算
+  try{
+    const r=results._rates;
+    if(r&&r.eur&&r.jpy&&r.gbp&&r.cad&&r.sek&&r.chf){
+      const eu=1.0/r.eur,gu=1.0/r.gbp;
+      const dxy=50.14348112*Math.pow(eu,-0.576)*Math.pow(r.jpy,0.136)*Math.pow(gu,-0.119)*Math.pow(r.cad,0.091)*Math.pow(r.sek,0.042)*Math.pow(r.chf,0.036);
+      results.dxy={name:'dxy',symbol:'DXY',price:r4(dxy),source:'公式估算',note:'6货币权重',updated:ts()};
+    }else{
+      results.dxy={name:'dxy',price:null,error:'汇率数据不足',source:'fallback',updated:ts()};
+    }
+  }catch(e){
+    results.dxy={name:'dxy',price:null,error:e.message,source:'fallback',updated:ts()};
+  }
+
+  // 4. 原油 — 新浪 (script标签绕过CORS)
+  results.oil = await fetchSinaOil();
+
+  // 5-6. 国债 — 缓存值
+  results.us10y={name:'us10y',yield:4.55,source:'美国财政部(06-05)',note:'非实时',updated:ts()};
+  results.us30y={name:'us30y',yield:5.01,source:'美国财政部(06-05)',note:'非实时',updated:ts()};
+  results.cn10y={name:'中国10年期国债',yield:1.72,source:'中国货币网(06-05)',note:'非实时',updated:ts()};
+  results.cn30y={name:'中国30年期国债',yield:2.20,source:'中国货币网(06-05)',note:'非实时',updated:ts()};
+
+  // 7. FedWatch
+  results.fedwatch={
+    source:'CME FedWatch',currentRate:'4.25-4.50%',meetingDate:'2026-06-17',
+    meetings:[
+      {rate:'4.00-4.25% (降息25bp)',probability:62.5},
+      {rate:'4.25-4.50% (维持)',probability:37.5},
+    ],
+    note:'离线缓存',updated:ts(),
+  };
+
+  results._time=ts();
+  return results;
+}
+
+// 新浪原油 — script标签方案
+function fetchSinaOil(){
+  return new Promise((resolve)=>{
+    const s=document.createElement('script');
+    s.src='https://hq.sinajs.cn/list=hf_CL';
+    s.onerror=()=>resolve({name:'oil',price:null,error:'加载失败',source:'sina',updated:ts()});
+    document.head.appendChild(s);
+    setTimeout(()=>{
+      try{
+        const t=window.hq_str_hf_CL||'';
+        if(!t){resolve({name:'oil',price:null,error:'无数据',source:'sina',updated:ts()});return;}
+        const d=t.split(',');
+        if(d.length>=8){
+          const p=parseFloat(d[0])||null;
+          const pc=parseFloat(d[7])||null;
+          const c=p&&pc?r4(p-pc):null;
+          const cp=p&&pc?r2((p-pc)/pc*100):null;
+          resolve({name:'oil',symbol:'CL',price:p,prevClose:pc,change:c,changePct:cp,source:'新浪财经',updated:ts()});
+        }else{
+          resolve({name:'oil',price:null,error:'格式错误',source:'sina',updated:ts()});
+        }
+      }catch(e){
+        resolve({name:'oil',price:null,error:e.message,source:'sina',updated:ts()});
+      }finally{
+        document.head.removeChild(s);
+      }
+    },1500);
+  });
+}
+
+// ==================== RENDER ====================
+function renderAll(data){
+  const fmt=(v,d=2)=>v!=null?Number(v).toFixed(d):'--';
+  const chg=(c,p)=>{
+    if(c==null&&p==null)return'<span class="card-change neutral">--</span>';
+    const cl=(c||0)>=0?'up':'down',s=(c||0)>=0?'+':'';
+    let t='';if(c!=null)t+=s+fmt(c);if(p!=null)t+=' ('+s+p.toFixed(2)+'%)';
+    return'<span class="card-change '+cl+'">'+t+'</span>';
+  };
+
+  function card(css,cat,name,item,unit,isY){
+    const p=isY?(item.yield??item.price):item.price;
+    const err=item.error;
+    if(err&&p==null)return'<div class="card card-'+css+' card-error"><div class="card-category">'+cat+'</div><div class="card-name">'+name+'</div><div class="card-price" style="font-size:16px;color:var(--accent-red)">--</div><div class="card-detail">'+err+'</div><div class="card-source">'+item.source+'</div></div>';
+    const pd=p!=null?fmt(p,isY?3:2):'--';
+    let det='';if(item.high!=null&&item.low!=null)det+='高'+fmt(item.high)+' 低'+fmt(item.low);
+    if(item.prevClose!=null)det+=' 昨收'+fmt(item.prevClose);
+    if(unit)det+=' <span style="color:var(--text-muted)">'+unit+'</span>';
+    return'<div class="card card-'+css+'"><div class="card-source">'+item.source+'</div><div class="card-category">'+cat+'</div><div class="card-name">'+name+'</div><div class="card-price">'+pd+'</div>'+chg(item.change,item.changePct)+'<div class="card-detail">'+det+'</div></div>';
+  }
+
+  let html='';
+  html+=card('oil','🛢️ 能源','WTI原油',data.oil||{},'USD/桶');
+  html+=card('gold','🥇 贵金属','COMEX黄金',data.gold||{},'USD/盎司');
+  html+=card('dxy','💵 外汇','美元指数 DXY',data.dxy||{},'');
+  html+=card('cnh','🇨🇳 外汇','离岸人民币 CNH',data.cnh||{},'');
+  html+=card('bond','🇺🇸 债券','美10年期国债',data.us10y||{},'%',true);
+  html+=card('bond','🇺🇸 债券','美30年期国债',data.us30y||{},'%',true);
+  html+=card('bond','🇨🇳 债券','中国10年期国债',data.cn10y||{},'%',true);
+  html+=card('bond','🇨🇳 债券','中国30年期国债',data.cn30y||{},'%',true);
+  html+=buildFed(data.fedwatch||{});
+  dataGrid.innerHTML=html;
+}
+
+function buildFed(fed){
+  let bars='';
+  (fed.meetings||[]).forEach(m=>{
+    const p=m.probability||0;
+    let bc='neutral';
+    const r=(m.rate||'').toLowerCase();
+    if(r.includes('降息')||r.includes('cut')||r.includes('ease'))bc='dovish';
+    if(r.includes('加息')||r.includes('hike')||r.includes('tighten'))bc='hawkish';
+    bars+='<div class="fed-bar-wrap"><div class="fed-bar-label"><span>'+m.rate+'</span><span class="prob">'+p.toFixed(1)+'%</span></div><div class="fed-bar-track"><div class="fed-bar-fill '+bc+'" style="width:'+Math.max(p,2)+'%"></div></div></div>';
+  });
+  return'<div class="card card-fed full-width"><div class="card-source">'+fed.source+'</div><div class="card-category">🏛️ 利率预期</div><div class="card-name">美联储: '+fed.meetingDate+'</div><div class="fed-current">当前利率: <strong>'+fed.currentRate+'</strong></div>'+bars+(fed.note?'<div class="card-detail" style="margin-top:6px">'+fed.note+'</div>':'')+'</div>';
+}
+
+function showSkeleton(){
+  dataGrid.innerHTML=Array(9).fill(0).map(()=>'<div class="card"><div class="card-category skeleton skel-change" style="width:40%"></div><div class="skeleton skel-price"></div><div class="skeleton skel-change"></div></div>').join('');
+}
+
+// ==================== SHARE ====================
+function buildShareText(){
+  if(!lastData)return'📊 财经数据看板 - 暂无数据\n请刷新后重试';
+  const f=(v,d=2)=>v!=null?Number(v).toFixed(d):'--';
+  const cp=(v)=>v!=null?(v>=0?'+':'')+v.toFixed(2)+'%':'--';
+  const l=[
+    '📊 实时财经数据看板',
+    '🕐 '+new Date().toLocaleString('zh-CN'),
+    '━━━━━━━━━━━━━━',
+    '🛢️ WTI原油: '+f((lastData.oil||{}).price)+' USD/桶 ['+cp((lastData.oil||{}).changePct)+']',
+    '🥇 黄金: '+f((lastData.gold||{}).price)+' USD/盎司',
+    '💵 美元指数: '+f((lastData.dxy||{}).price),
+    '🇨🇳 离岸人民币: '+f((lastData.cnh||{}).price),
+    '🇺🇸 美10年国债: '+f((lastData.us10y||{}).yield,3)+'%',
+    '🇺🇸 美30年国债: '+f((lastData.us30y||{}).yield,3)+'%',
+    '🇨🇳 中国10年国债: '+f((lastData.cn10y||{}).yield,3)+'%',
+    '🇨🇳 中国30年国债: '+f((lastData.cn30y||{}).yield,3)+'%',
+  ];
+  const fed=lastData.fedwatch||{};
+  if(fed.currentRate){
+    l.push('🏛️ 美联储: '+fed.currentRate+' | 下次: '+(fed.meetingDate||'--'));
+    (fed.meetings||[]).forEach(m=>{l.push('   '+m.rate+': '+(m.probability||0).toFixed(1)+'%');});
+  }
+  l.push('━━━━━━━━━━━━━━');
+  l.push('📱 财经数据看板 | 数据仅供参考');
+  return l.join('\n');
+}
+
+function openShare(){
+  sharePreview.textContent=buildShareText();
+  shareOverlay.classList.add('active');
+  btnCopy.textContent='📋 复制文本';btnCopy.classList.remove('copied');
+}
+function closeShare(e){if(e.target===shareOverlay)shareOverlay.classList.remove('active');}
+function closeShareDirect(){shareOverlay.classList.remove('active');}
+
+async function copyToClipboard(text){
+  try{await navigator.clipboard.writeText(text);return true;}
+  catch{const ta=document.createElement('textarea');ta.value=text;ta.style.cssText='position:fixed;opacity:0;';document.body.appendChild(ta);ta.select();document.execCommand('copy');document.body.removeChild(ta);return true;}
+}
+async function shareTo(p){
+  await copyToClipboard(buildShareText());
+  const n=p==='wechat'?'微信好友':'朋友圈';
+  showToast('✅ 已复制！请打开'+n+'粘贴发送');
+  setTimeout(closeShareDirect,800);
+}
+async function copyShareText(){
+  await copyToClipboard(buildShareText());
+  btnCopy.textContent='✅ 已复制!';btnCopy.classList.add('copied');
+  showToast('已复制到剪贴板');
+  setTimeout(()=>{btnCopy.textContent='📋 复制文本';btnCopy.classList.remove('copied');},2000);
+}
+function showToast(msg){
+  toast.textContent=msg;toast.classList.add('show');
+  clearTimeout(toast._t);toast._t=setTimeout(()=>toast.classList.remove('show'),2500);
+}
+
+init();
+</script>
+</body>
+</html>
