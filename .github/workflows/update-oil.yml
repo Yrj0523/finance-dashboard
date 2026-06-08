@@ -1,0 +1,50 @@
+name: Update Oil Price
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'  # 每5分钟
+  workflow_dispatch:        # 手动触发
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch oil price from Sina
+        run: |
+          # 抓取 WTI原油 (hf_CL) 和 布伦特 (hf_OIL)
+          WTI=$(curl -s -H "Referer: https://finance.sina.com.cn/" "https://hq.sinajs.cn/list=hf_CL" | iconv -f GBK -t UTF-8 | grep -oP '"\K[^"]+')
+          BRENT=$(curl -s -H "Referer: https://finance.sina.com.cn/" "https://hq.sinajs.cn/list=hf_OIL" | iconv -f GBK -t UTF-8 | grep -oP '"\K[^"]+')
+
+          # 解析数据: data[0]=最新价, data[7]=昨收, data[3]=最高, data[4]=最低
+          parse() {
+            echo "$1" | awk -F',' '{printf "{\"price\":%s,\"prevClose\":%s,\"high\":%s,\"low\":%s}", $1, $8, $4, $5}'
+          }
+
+          WTI_DATA=$(parse "$WTI")
+          BRENT_DATA=$(parse "$BRENT")
+
+          NOW=$(TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M:%S')
+
+          cat > oil.json << EOF
+          {
+            "updated": "${NOW}",
+            "source": "新浪财经",
+            "wti": ${WTI_DATA},
+            "brent": ${BRENT_DATA}
+          }
+          EOF
+
+          echo "Generated oil.json:"
+          cat oil.json
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add oil.json
+          git diff --staged --quiet || git commit -m "Update oil price [skip ci]"
+          git push
