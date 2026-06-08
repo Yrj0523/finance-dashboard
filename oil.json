@@ -1,16 +1,6 @@
 {
-  "updated": "2026-06-08 13:09:51",
+  "updated": "2026-06-08 13:19:06",
   "source": "新浪财经",
-  "wti": {
-    "price": 94.478,
-    "prevClose": 90.54,
-    "high": 94.46,
-    "low": 94.8
-  },
-  "brent": {
-    "price": 97.342,
-    "prevClose": 93.09,
-    "high": 97.34,
-    "low": 97.45
-  }
+  "wti": {"price":94.399,"prevClose":90.540,"high":94.360,"low":94.800}{"price":;,"prevClose":,"high":,"low":},
+  "brent": {"price":97.222,"prevClose":93.090,"high":97.230,"low":97.470}{"price":;,"prevClose":,"high":,"low":}
 }
