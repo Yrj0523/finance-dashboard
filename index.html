@@ -354,109 +354,75 @@ async function fetchAllData(){
   return results;
 }
 
-// ==================== SINA OIL — JSONP + script tag to bypass CORS ====================
-// 新浪API不返回CORS头，fetch()会被浏览器拦截。但新浪支持JSONP格式(var hq_str_xxx="...")
-// 通过动态创建<script>标签加载，绕过同源策略
+// ==================== OIL — 同域 oil.json (GitHub Actions每5分钟更新) ====================
+// 方案: GitHub Actions定时抓取新浪数据 → 写入 oil.json → 前端同域读取，完全绕过CORS
 async function fetchSinaOil(){
+  try{
+    // 主方案: 同域JSON文件 (无CORS问题)
+    const r = await fetch('oil.json?t=' + Date.now());
+    const d = await r.json();
+    if(d && d.wti && d.wti.price){
+      const p = d.wti.price;
+      const pc = d.wti.prevClose;
+      const c = p && pc ? r4(p - pc) : null;
+      const cp = p && pc ? r2((p - pc) / pc * 100) : null;
+      return {
+        name:'oil', symbol:'WTI', price:p, prevClose:pc,
+        high: d.wti.high || null, low: d.wti.low || null,
+        change: c, changePct: cp,
+        source:'新浪财经(同域)', updated: d.updated || ts()
+      };
+    }
+  }catch(e){ console.log('oil.json failed:', e.message); }
+
+  // 降级: JSONP script标签方式 (当GitHub Actions未初始化时)
+  return fetchOilJSONP();
+}
+
+function fetchOilJSONP(){
   return new Promise(resolve => {
-    const callbackName = '_oil_cb_' + Date.now();
     const script = document.createElement('script');
     const timeout = setTimeout(() => {
-      cleanup();
-      // 降级方案: 尝试 fetch (部分浏览器/网络环境可能成功)
-      fetchOilFallback().then(resolve);
+      if(script.parentNode) script.parentNode.removeChild(script);
+      resolve({name:'oil',price:null,error:'WTI获取失败',source:'sina',updated:ts()});
     }, 8000);
 
-    function cleanup(){
-      clearTimeout(timeout);
-      if(script.parentNode) script.parentNode.removeChild(script);
-      delete window[callbackName];
-    }
-
-    // JSONP callback: 新浪返回 var hq_str_hf_CL="数据", 我们将其赋值给window[callbackName]
-    // 但我们无法直接控制变量名。策略: 劫持全局，在script加载完成后读取
-    window[callbackName] = function(data){
-      cleanup();
-      try{
-        // data格式: "94.381,,94.310,94.340,94.800,92.200,12:50:30,90.540,93.000,..."
-        const d = data.split(',');
-        if(d.length >= 8){
-          const p = parseFloat(d[0]) || null;
-          const pc = parseFloat(d[7]) || null;
-          const high = parseFloat(d[3]) || null;
-          const low = parseFloat(d[4]) || null;
-          const c = p && pc ? r4(p - pc) : null;
-          const cp = p && pc ? r2((p - pc) / pc * 100) : null;
-          if(p && p > 0){
-            resolve({name:'oil',symbol:'WTI',price:p,prevClose:pc,high:high,low:low,change:c,changePct:cp,source:'新浪财经',updated:ts()});
-            return;
-          }
-        }
-      }catch(e){}
-      // 解析失败，降级
-      fetchOilFallback().then(resolve);
-    };
-
-    // 使用新浪的JSONP接口: 返回 var hq_str_hf_CL="..."
-    // 我们需要劫持这个变量。通过重写script加载完成后的全局变量读取
     script.src = 'https://hq.sinajs.cn/list=hf_CL';
     script.onload = function(){
-      // 新浪script执行后，全局变量 hq_str_hf_CL 被赋值
-      // 通过轮询检查
       let attempts = 0;
       const check = setInterval(() => {
         attempts++;
         if(typeof hq_str_hf_CL !== 'undefined' && hq_str_hf_CL){
-          clearInterval(check);
-          const raw = hq_str_hf_CL;
+          clearInterval(check); clearTimeout(timeout);
+          if(script.parentNode) script.parentNode.removeChild(script);
+          const match = hq_str_hf_CL.match(/"([^"]*)"/);
           delete window.hq_str_hf_CL;
-          // 提取引号内的数据
-          const match = raw.match(/"([^"]*)"/);
           if(match){
-            window[callbackName](match[1]);
-          } else {
-            cleanup();
-            fetchOilFallback().then(resolve);
+            const d = match[1].split(',');
+            if(d.length >= 8){
+              const p = parseFloat(d[0])||null, pc = parseFloat(d[7])||null;
+              if(p&&p>0){
+                resolve({name:'oil',symbol:'WTI',price:p,prevClose:pc,
+                  change:r4(p-pc),changePct:r2((p-pc)/pc*100),
+                  source:'新浪财经(JSONP)',updated:ts()}); return;
+              }
+            }
           }
+          resolve({name:'oil',price:null,error:'解析失败',source:'sina',updated:ts()});
         } else if(attempts > 50){
-          clearInterval(check);
-          cleanup();
-          fetchOilFallback().then(resolve);
+          clearInterval(check); clearTimeout(timeout);
+          if(script.parentNode) script.parentNode.removeChild(script);
+          resolve({name:'oil',price:null,error:'加载超时',source:'sina',updated:ts()});
         }
       }, 100);
     };
     script.onerror = function(){
-      cleanup();
-      fetchOilFallback().then(resolve);
+      clearTimeout(timeout);
+      if(script.parentNode) script.parentNode.removeChild(script);
+      resolve({name:'oil',price:null,error:'WTI获取失败(需国内网络)',source:'sina',updated:ts()});
     };
     document.head.appendChild(script);
   });
-}
-
-// 降级方案: 尝试直接fetch(部分网络环境可能成功)
-async function fetchOilFallback(){
-  try{
-    const r = await fetch('https://hq.sinajs.cn/list=hf_CL', {
-      headers: {'Referer': 'https://finance.sina.com.cn/'},
-      mode: 'cors'
-    });
-    const buf = await r.arrayBuffer();
-    const text = new TextDecoder('gbk').decode(buf);
-    const match = text.match(/"([^"]*)"/);
-    if(match){
-      const d = match[1].split(',');
-      if(d.length >= 8){
-        const p = parseFloat(d[0]) || null;
-        const pc = parseFloat(d[7]) || null;
-        if(p && p > 0) return {
-          name:'oil',symbol:'WTI',price:p,prevClose:pc,
-          change:r4(p-pc),changePct:r2((p-pc)/pc*100),
-          source:'新浪财经',updated:ts()
-        };
-      }
-    }
-  }catch(e){}
-  return {name:'oil',price:null,error:'WTI获取失败(需国内网络)',source:'sina',updated:ts()};
 }
 
 // ==================== US YIELDS ====================
