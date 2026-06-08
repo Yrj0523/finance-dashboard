@@ -569,6 +569,7 @@ function generateShareImage(){
     const canvas=shareCanvas;
     const ctx=canvas.getContext('2d');
     const W=600,H=900;
+    const cr=10;
 
     // Background
     ctx.fillStyle='#0f1923';
@@ -609,7 +610,6 @@ function generateShareImage(){
 
       // Background card
       ctx.fillStyle='#1a2d3d';
-      const cr=10;
       ctx.beginPath();ctx.moveTo(30+cr,y);ctx.lineTo(W-30-cr,y);
       ctx.quadraticCurveTo(W-30,y,W-30,y+cr);
       ctx.lineTo(W-30,y+70-cr);
