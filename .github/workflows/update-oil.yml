@@ -69,7 +69,8 @@ jobs:
               reader = csv.DictReader(io.StringIO(text))
               rows = list(reader)
               if rows:
-                  last = rows[-1]
+                  # CSV is descending (latest first): rows[0] = newest
+                  last = rows[0]
                   date_str = last.get('Date', '').strip()
                   us10y = last.get('10 Yr', '').strip()
                   us30y = last.get('30 Yr', '').strip()
@@ -77,9 +78,9 @@ jobs:
                       bonds['us10y'] = {'yield': float(us10y), 'date': date_str}
                       bonds['us30y'] = {'yield': float(us30y), 'date': date_str}
                       print(f"US 10Y: {us10y}%, US 30Y: {us30y}% (date: {date_str})")
-                  # Get previous day for change calculation
+                  # Get previous day for change calculation (rows[1])
                   if len(rows) >= 2:
-                      prev = rows[-2]
+                      prev = rows[1]
                       p10 = prev.get('10 Yr', '').strip()
                       p30 = prev.get('30 Yr', '').strip()
                       if p10: bonds['us10y']['prev'] = float(p10)
@@ -89,38 +90,26 @@ jobs:
 
           # ========== China Bond Yields (chinabond.com.cn) ==========
           try:
-              # ChinaBond API endpoint
-              r = subprocess.run(['curl', '-s',
+              r = subprocess.run(['curl', '-s', '-H', 'User-Agent: Mozilla/5.0',
                   'https://yield.chinabond.com.cn/cbweb-czb-web/czb/moreInfo?locale=en_US&nameType=1'],
-                  capture_output=True, timeout=30,
-                  headers={'User-Agent': 'Mozilla/5.0'})
+                  capture_output=True, timeout=30)
               html = r.stdout.decode('utf-8', errors='replace')
 
-              # Try to find yield data in the page
-              # The page has data in a structured format, try common patterns
-              cn10y_match = re.search(r'10[-\s]*[Yy]ear.*?(\d+\.\d+)', html)
-              cn30y_match = re.search(r'30[-\s]*[Yy]ear.*?(\d+\.\d+)', html)
+              # Parse table: <td>10Yr</td> ... <td>VALUE</td>
+              cn10y_match = re.search(r'<td>10Yr</td>\s*<td>(\d+\.\d+)</td>', html)
+              cn30y_match = re.search(r'<td>30Yr</td>\s*<td>(\d+\.\d+)</td>', html)
 
-              # Alternative: look for table data
-              if not cn10y_match:
-                  # Try extracting from JSON-like data in page
-                  script_match = re.search(r'window\.__INITIAL_STATE__\s*=\s*({.*?});', html, re.DOTALL)
-                  if not script_match:
-                      # Try another pattern
-                      script_match = re.search(r'var\s+data\s*=\s*({.*?});', html, re.DOTALL)
+              tz = timezone(timedelta(hours=8))
+              today = datetime.now(tz).strftime('%Y-%m-%d')
 
               if cn10y_match and cn30y_match:
-                  bonds['cn10y'] = {'yield': float(cn10y_match.group(1))}
-                  bonds['cn30y'] = {'yield': float(cn30y_match.group(1))}
+                  bonds['cn10y'] = {'yield': float(cn10y_match.group(1)), 'date': today}
+                  bonds['cn30y'] = {'yield': float(cn30y_match.group(1)), 'date': today}
                   print(f"CN 10Y: {cn10y_match.group(1)}%, CN 30Y: {cn30y_match.group(1)}%")
               else:
-                  print(f"CN bond parse: 10Y={cn10y_match is not None}, 30Y={cn30y_match is not None}")
-                  # Fallback: use known recent values with today's date
-                  tz = timezone(timedelta(hours=8))
-                  today = datetime.now(tz).strftime('%Y-%m-%d')
+                  print(f"CN bond parse failed: 10Y={cn10y_match is not None}, 30Y={cn30y_match is not None}")
                   bonds['cn10y'] = {'yield': 1.74, 'date': today, 'note': 'fallback'}
                   bonds['cn30y'] = {'yield': 2.22, 'date': today, 'note': 'fallback'}
-                  print(f"CN bond fallback: 10Y=1.74%, 30Y=2.22%")
           except Exception as e:
               print(f'China bond fetch error: {e}')
               tz = timezone(timedelta(hours=8))
