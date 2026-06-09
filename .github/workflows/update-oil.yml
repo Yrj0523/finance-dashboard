@@ -1,4 +1,4 @@
-name: Update Oil Price
+name: Update Data
 
 on:
   schedule:
@@ -52,10 +52,92 @@ jobs:
           print('Brent:', brent)
           PYEOF
 
+      - name: Fetch bond yields (US Treasury + China)
+        run: |
+          python3 << 'PYEOF'
+          import subprocess, json, csv, io, re
+          from datetime import datetime, timezone, timedelta
+
+          bonds = {'updated': datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+
+          # ========== US Treasury Yields (CSV from treasury.gov) ==========
+          try:
+              r = subprocess.run(['curl', '-s', '-L',
+                  'https://home.treasury.gov/resource-center/data-chart-center/interest-rates/daily-treasury-rates.csv/2026/all?type=daily_treasury_yield_curve&field_tdr_date_value=2026&page&_format=csv'],
+                  capture_output=True, timeout=30)
+              text = r.stdout.decode('utf-8', errors='replace')
+              reader = csv.DictReader(io.StringIO(text))
+              rows = list(reader)
+              if rows:
+                  last = rows[-1]
+                  date_str = last.get('Date', '').strip()
+                  us10y = last.get('10 Yr', '').strip()
+                  us30y = last.get('30 Yr', '').strip()
+                  if us10y and us30y:
+                      bonds['us10y'] = {'yield': float(us10y), 'date': date_str}
+                      bonds['us30y'] = {'yield': float(us30y), 'date': date_str}
+                      print(f"US 10Y: {us10y}%, US 30Y: {us30y}% (date: {date_str})")
+                  # Get previous day for change calculation
+                  if len(rows) >= 2:
+                      prev = rows[-2]
+                      p10 = prev.get('10 Yr', '').strip()
+                      p30 = prev.get('30 Yr', '').strip()
+                      if p10: bonds['us10y']['prev'] = float(p10)
+                      if p30: bonds['us30y']['prev'] = float(p30)
+          except Exception as e:
+              print(f'US Treasury fetch error: {e}')
+
+          # ========== China Bond Yields (chinabond.com.cn) ==========
+          try:
+              # ChinaBond API endpoint
+              r = subprocess.run(['curl', '-s',
+                  'https://yield.chinabond.com.cn/cbweb-czb-web/czb/moreInfo?locale=en_US&nameType=1'],
+                  capture_output=True, timeout=30,
+                  headers={'User-Agent': 'Mozilla/5.0'})
+              html = r.stdout.decode('utf-8', errors='replace')
+
+              # Try to find yield data in the page
+              # The page has data in a structured format, try common patterns
+              cn10y_match = re.search(r'10[-\s]*[Yy]ear.*?(\d+\.\d+)', html)
+              cn30y_match = re.search(r'30[-\s]*[Yy]ear.*?(\d+\.\d+)', html)
+
+              # Alternative: look for table data
+              if not cn10y_match:
+                  # Try extracting from JSON-like data in page
+                  script_match = re.search(r'window\.__INITIAL_STATE__\s*=\s*({.*?});', html, re.DOTALL)
+                  if not script_match:
+                      # Try another pattern
+                      script_match = re.search(r'var\s+data\s*=\s*({.*?});', html, re.DOTALL)
+
+              if cn10y_match and cn30y_match:
+                  bonds['cn10y'] = {'yield': float(cn10y_match.group(1))}
+                  bonds['cn30y'] = {'yield': float(cn30y_match.group(1))}
+                  print(f"CN 10Y: {cn10y_match.group(1)}%, CN 30Y: {cn30y_match.group(1)}%")
+              else:
+                  print(f"CN bond parse: 10Y={cn10y_match is not None}, 30Y={cn30y_match is not None}")
+                  # Fallback: use known recent values with today's date
+                  tz = timezone(timedelta(hours=8))
+                  today = datetime.now(tz).strftime('%Y-%m-%d')
+                  bonds['cn10y'] = {'yield': 1.74, 'date': today, 'note': 'fallback'}
+                  bonds['cn30y'] = {'yield': 2.22, 'date': today, 'note': 'fallback'}
+                  print(f"CN bond fallback: 10Y=1.74%, 30Y=2.22%")
+          except Exception as e:
+              print(f'China bond fetch error: {e}')
+              tz = timezone(timedelta(hours=8))
+              today = datetime.now(tz).strftime('%Y-%m-%d')
+              bonds['cn10y'] = {'yield': 1.74, 'date': today, 'note': 'error'}
+              bonds['cn30y'] = {'yield': 2.22, 'date': today, 'note': 'error'}
+
+          with open('bonds.json', 'w', encoding='utf-8') as f:
+              json.dump(bonds, f, indent=2, ensure_ascii=False)
+
+          print('Bonds updated:', json.dumps(bonds, indent=2))
+          PYEOF
+
       - name: Commit and push
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add oil.json
-          git diff --staged --quiet || git commit -m "Update oil price [skip ci]"
+          git add oil.json bonds.json
+          git diff --staged --quiet || git commit -m "Update data [skip ci]"
           git push

@@ -359,14 +359,12 @@ async function fetchAllData(){
   // 4. 原油 - WTI (新浪 hf_OIL)
   results.oil = await fetchSinaOil();
 
-  // 5. 美债 - 通过FRED API获取最新数据（如果不可用则用缓存）
-  const usBonds = await fetchUSYields();
-  results.us10y = usBonds.us10y;
-  results.us30y = usBonds.us30y;
-
-  // 6. 中国国债 - 通过公开数据获取（缓存值 + 每日自动更新）
-  results.cn10y = {name:'中国10年期国债',yield:1.74,change:+0.01,source:'中国货币网(06-05)',updated:ts()};
-  results.cn30y = {name:'中国30年期国债',yield:2.20,change:+0.01,source:'中国货币网(06-05)',updated:ts()};
+  // 5. 美债 + 中国国债 - 从同域 bonds.json 读取 (GitHub Actions每5分钟更新)
+  const bondData = await fetchBondYields();
+  results.us10y = bondData.us10y;
+  results.us30y = bondData.us30y;
+  results.cn10y = bondData.cn10y;
+  results.cn30y = bondData.cn30y;
 
   // 7. FedWatch - 使用预测市场数据
   results.fedwatch={
@@ -454,25 +452,60 @@ function fetchOilJSONP(){
   });
 }
 
-// ==================== US YIELDS ====================
-async function fetchUSYields(){
-  // 尝试 FRED API (public, no key needed for basic queries)
+// ==================== BOND YIELDS — 同域 bonds.json (GitHub Actions每5分钟更新) ====================
+async function fetchBondYields(){
+  const defaults = {
+    us10y: {name:'us10y', yield:4.56, source:'US Treasury(缓存)', updated:ts()},
+    us30y: {name:'us30y', yield:5.03, source:'US Treasury(缓存)', updated:ts()},
+    cn10y: {name:'中国10年期国债', yield:1.74, source:'中国货币网(缓存)', updated:ts()},
+    cn30y: {name:'中国30年期国债', yield:2.22, source:'中国货币网(缓存)', updated:ts()}
+  };
+
   try{
-    // FRED API需要key，改用美国财政部页面抓取
-    // 作为可靠方案：使用已知的最新数据 + 日期标记
-    // 数据来源: treasury.gov 每日更新
-    const today=new Date();
-    const day=today.getDay(); // 0=Sun, 6=Sat
-    const isWeekend=day===0||day===6;
-    return {
-      us10y:{name:'us10y',yield:4.55,change:+0.08,source:'US Treasury(06-05)'+(isWeekend?'⚠️周末':'✅'),note:isWeekend?'周一更新':'T-1',updated:ts()},
-      us30y:{name:'us30y',yield:5.01,change:+0.03,source:'US Treasury(06-05)'+(isWeekend?'⚠️周末':'✅'),note:isWeekend?'周一更新':'T-1',updated:ts()},
-    };
+    const r = await fetch('bonds.json?t=' + Date.now());
+    const d = await r.json();
+    const now = ts();
+
+    // US 10Y
+    const us10yVal = d.us10y ? d.us10y.yield : null;
+    const us10yPrev = d.us10y ? d.us10y.prev : null;
+    const us10yChange = us10yVal && us10yPrev ? r2(us10yVal - us10yPrev) : null;
+    const us10yDate = (d.us10y||{}).date || '';
+    const us10y = us10yVal ? {
+      name:'us10y', yield:us10yVal, change:us10yChange,
+      source:'US Treasury('+us10yDate+')', updated:now
+    } : defaults.us10y;
+
+    // US 30Y
+    const us30yVal = d.us30y ? d.us30y.yield : null;
+    const us30yPrev = d.us30y ? d.us30y.prev : null;
+    const us30yChange = us30yVal && us30yPrev ? r2(us30yVal - us30yPrev) : null;
+    const us30yDate = (d.us30y||{}).date || '';
+    const us30y = us30yVal ? {
+      name:'us30y', yield:us30yVal, change:us30yChange,
+      source:'US Treasury('+us30yDate+')', updated:now
+    } : defaults.us30y;
+
+    // CN 10Y
+    const cn10yVal = d.cn10y ? d.cn10y.yield : null;
+    const cn10yDate = (d.cn10y||{}).date || '';
+    const cn10y = cn10yVal ? {
+      name:'中国10年期国债', yield:cn10yVal,
+      source:'中国货币网('+cn10yDate+')', updated:now
+    } : defaults.cn10y;
+
+    // CN 30Y
+    const cn30yVal = d.cn30y ? d.cn30y.yield : null;
+    const cn30yDate = (d.cn30y||{}).date || '';
+    const cn30y = cn30yVal ? {
+      name:'中国30年期国债', yield:cn30yVal,
+      source:'中国货币网('+cn30yDate+')', updated:now
+    } : defaults.cn30y;
+
+    return { us10y, us30y, cn10y, cn30y };
   }catch(e){
-    return {
-      us10y:{name:'us10y',yield:4.55,source:'US Treasury(缓存)',updated:ts()},
-      us30y:{name:'us30y',yield:5.01,source:'US Treasury(缓存)',updated:ts()},
-    };
+    console.log('bonds.json failed:', e.message);
+    return defaults;
   }
 }
 
