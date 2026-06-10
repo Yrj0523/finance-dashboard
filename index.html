@@ -192,7 +192,30 @@ function r2(v){return v?Math.round(v*100)/100:null}
 function ts(){return new Date().toLocaleTimeString('zh-CN',{hour12:false})}
 
 // ==================== INIT ====================
+async function clearOldCaches(){
+  // 清除旧版Service Worker和缓存，确保获取最新数据
+  if('serviceWorker' in navigator){
+    try{
+      const regs = await navigator.serviceWorker.getRegistrations();
+      for(const reg of regs){
+        await reg.unregister();
+        console.log('SW unregistered');
+      }
+    }catch(e){}
+  }
+  if('caches' in window){
+    try{
+      const keys = await caches.keys();
+      for(const key of keys){
+        await caches.delete(key);
+        console.log('Cache deleted:', key);
+      }
+    }catch(e){}
+  }
+}
+
 function init(){
+  clearOldCaches(); // 启动时清除旧缓存
   updateClock();
   setInterval(updateClock,1000);
   setupRefresh();
