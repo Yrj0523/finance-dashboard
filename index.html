@@ -268,8 +268,11 @@ async function fetchAllData(){
   let todayData=null, prevData=null;
   const todayDate = new Date();
   try{
-    // 获取今日数据
-    const todayR=await fetch('https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.min.json');
+    // 获取今日数据 (添加时间戳绕过CDN缓存)
+    const todayR=await fetch('https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.min.json?_=' + Date.now(), {
+      cache: 'no-store',
+      headers: {'Accept': 'application/json'}
+    });
     todayData=await todayR.json();
     const todayRates=todayData.usd||{};
     results._rates=todayRates;
@@ -281,7 +284,9 @@ async function fetchAllData(){
       d.setDate(d.getDate()-i);
       const ds=d.toISOString().slice(0,10);
       try{
-        const prevR=await fetch('https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@'+ds+'/v1/currencies/usd.min.json');
+        const prevR=await fetch('https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@'+ds+'/v1/currencies/usd.min.json?_=' + Date.now(), {
+          cache: 'no-store'
+        });
         if(prevR.ok){
           const pd=await prevR.json();
           if(pd.date && pd.date !== todayData.date){
