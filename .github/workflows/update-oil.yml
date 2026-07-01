@@ -178,8 +178,8 @@ jobs:
                   # Extract meeting date
                   date_match = re.search(r'(\d{1,2}\s+\w{3}\s+\d{4})', html)
 
-                  # Extract current rate range
-                  rate_match = re.search(r'(\d+\.?\d*)\s*(?:%|to)\s*(\d+\.?\d*)\s*%', html)
+                  # Extract current rate range (e.g. "3.50% to 3.75%")
+                  rate_match = re.search(r'(\d+\.\d+)\s*%\s*to\s*(\d+\.\d+)\s*%', html)
 
                   if hold_match:
                       hold_pct = float(hold_match.group(1))
@@ -198,9 +198,10 @@ jobs:
 
                       fed['source'] = 'growbeansprout.com'
                       fed['meetingDate'] = date_match.group(1) if date_match else ''
-                      fed['currentRate'] = f'{rate_match.group(1)}%-{rate_match.group(2)}%' if rate_match else '3.50%-3.75%'
+                      cur_rate = f'{rate_match.group(1)}%-{rate_match.group(2)}%' if rate_match else '3.50%-3.75%'
+                      fed['currentRate'] = cur_rate
                       fed['meetings'] = [
-                          {'rate': '维持利率 3.50%-3.75%', 'probability': hold_pct},
+                          {'rate': f'维持利率 {cur_rate}', 'probability': hold_pct},
                           {'rate': '加息25bp', 'probability': hike_pct},
                           {'rate': '降息25bp', 'probability': cut_pct},
                       ]
