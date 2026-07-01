@@ -123,10 +123,116 @@ jobs:
           print('Bonds updated:', json.dumps(bonds, indent=2))
           PYEOF
 
+      - name: Fetch FedWatch probabilities
+        run: |
+          python3 << 'PYEOF'
+          import subprocess, json, re
+          from datetime import datetime, timezone, timedelta
+
+          fed = {'updated': datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+          tz = timezone(timedelta(hours=8))
+
+          # ========== 方案1: CME FedWatch API ==========
+          try:
+              r = subprocess.run(['curl', '-s', '--max-time', '15',
+                  'https://markets.api.cmegroup.com/fedwatch/v1/forecasts',
+                  '-H', 'Accept: application/json'], capture_output=True, timeout=20)
+              text = r.stdout.decode('utf-8', errors='replace')
+              if text and text.strip().startswith('{'):
+                  data = json.loads(text)
+                  # Parse CME API response
+                  forecasts = data.get('forecastDatas', data.get('data', []))
+                  if not forecasts and isinstance(data, list):
+                      forecasts = data
+                  if forecasts:
+                      f0 = forecasts[0] if isinstance(forecasts, list) else forecasts
+                      # Extract probabilities
+                      probs = f0.get('probabilities', f0.get('forecast', {}))
+                      if probs:
+                          fed['source'] = 'CME FedWatch API'
+                          fed['meetingDate'] = f0.get('meetingDate', '')
+                          fed['currentRate'] = '3.50%-3.75%'
+                          meetings = []
+                          for k, v in probs.items():
+                              meetings.append({'rate': k, 'probability': float(v)})
+                          fed['meetings'] = meetings
+                          print(f"CME API success: {json.dumps(fed, indent=2)}")
+              if 'meetings' not in fed:
+                  raise Exception('CME API response unparseable')
+          except Exception as e:
+              print(f'CME API failed: {e}')
+
+              # ========== 方案2: growbeansprout.com ==========
+              try:
+                  r = subprocess.run(['curl', '-s', '--max-time', '15',
+                      '-H', 'User-Agent: Mozilla/5.0',
+                      'https://growbeansprout.com/tools/fedwatch'],
+                      capture_output=True, timeout=20)
+                  html = r.stdout.decode('utf-8', errors='replace')
+
+                  # Extract hold probability
+                  hold_match = re.search(r'(\d+\.?\d*)%\s*probability.*?(?:maintain|hold)', html, re.IGNORECASE)
+                  if not hold_match:
+                      hold_match = re.search(r'probability.*?(\d+\.?\d*)%', html, re.IGNORECASE)
+
+                  # Extract meeting date
+                  date_match = re.search(r'(\d{1,2}\s+\w{3}\s+\d{4})', html)
+
+                  # Extract current rate range
+                  rate_match = re.search(r'(\d+\.?\d*)\s*(?:%|to)\s*(\d+\.?\d*)\s*%', html)
+
+                  if hold_match:
+                      hold_pct = float(hold_match.group(1))
+                      # Determine hike vs cut from context
+                      # If hold > 50%, remaining is likely hike (in current hawkish environment)
+                      # Check for hike/cut keywords
+                      has_hike = bool(re.search(r'hike|raise|increase', html, re.IGNORECASE))
+                      has_cut = bool(re.search(r'cut|lower|decrease|reduce', html, re.IGNORECASE))
+
+                      remaining = round(100 - hold_pct, 1)
+
+                      # Current environment: inflation high, rate hike expected
+                      # Default: remaining goes to hike
+                      hike_pct = remaining
+                      cut_pct = 0.0
+
+                      fed['source'] = 'growbeansprout.com'
+                      fed['meetingDate'] = date_match.group(1) if date_match else ''
+                      fed['currentRate'] = f'{rate_match.group(1)}%-{rate_match.group(2)}%' if rate_match else '3.50%-3.75%'
+                      fed['meetings'] = [
+                          {'rate': '维持利率 3.50%-3.75%', 'probability': hold_pct},
+                          {'rate': '加息25bp', 'probability': hike_pct},
+                          {'rate': '降息25bp', 'probability': cut_pct},
+                      ]
+                      print(f"Growbeansprout success: hold={hold_pct}%, hike={hike_pct}%")
+                  else:
+                      raise Exception('Could not parse growbeansprout')
+              except Exception as e2:
+                  print(f'Growbeansprout failed: {e2}')
+
+                  # ========== 方案3: 缓存值 ==========
+                  today = datetime.now(tz).strftime('%Y-%m-%d')
+                  fed['source'] = '缓存数据'
+                  fed['meetingDate'] = '2026-07-29'
+                  fed['currentRate'] = '3.50%-3.75%'
+                  fed['meetings'] = [
+                      {'rate': '维持利率 3.50%-3.75%', 'probability': 70.1},
+                      {'rate': '加息25bp', 'probability': 29.9},
+                      {'rate': '降息25bp', 'probability': 0.0},
+                  ]
+                  fed['note'] = 'fallback cache'
+                  print('Using fallback cache data')
+
+          with open('fedwatch.json', 'w', encoding='utf-8') as f:
+              json.dump(fed, f, indent=2, ensure_ascii=False)
+
+          print('FedWatch:', json.dumps(fed, indent=2, ensure_ascii=False))
+          PYEOF
+
       - name: Commit and push
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add oil.json bonds.json
+          git add oil.json bonds.json fedwatch.json
           git diff --staged --quiet || git commit -m "Update data [skip ci]"
           git push

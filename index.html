@@ -394,16 +394,8 @@ async function fetchAllData(){
   results.cn10y = bondData.cn10y;
   results.cn30y = bondData.cn30y;
 
-  // 7. FedWatch - 使用预测市场数据
-  results.fedwatch={
-    source:'Kalshi/Polymarket',currentRate:'3.63%',meetingDate:'2026-06-17',
-    meetings:[
-      {rate:'维持利率 3.63%',probability:99.1},
-      {rate:'降息25bp',probability:1.4},
-      {rate:'加息25bp',probability:0.7},
-    ],
-    updated:ts(),
-  };
+  // 7. FedWatch - 从同域 fedwatch.json 读取 (GitHub Actions每5分钟更新)
+  results.fedwatch = await fetchFedWatch();
 
   results._time=ts();
   return results;
@@ -533,6 +525,33 @@ async function fetchBondYields(){
     return { us10y, us30y, cn10y, cn30y };
   }catch(e){
     console.log('bonds.json failed:', e.message);
+    return defaults;
+  }
+}
+
+// ==================== FEDWATCH — 同域 fedwatch.json (GitHub Actions每5分钟更新) ====================
+async function fetchFedWatch(){
+  const defaults = {
+    source:'缓存数据', currentRate:'3.50%-3.75%', meetingDate:'2026-07-29',
+    meetings:[
+      {rate:'维持利率 3.50%-3.75%', probability:70.1},
+      {rate:'加息25bp', probability:29.9},
+      {rate:'降息25bp', probability:0.0},
+    ],
+    updated:ts()
+  };
+  try{
+    const r = await fetch('fedwatch.json?t=' + Date.now(), {cache:'no-store'});
+    const d = await r.json();
+    return {
+      source: d.source || 'CME FedWatch',
+      currentRate: d.currentRate || '3.50%-3.75%',
+      meetingDate: d.meetingDate || '',
+      meetings: d.meetings || defaults.meetings,
+      updated: ts()
+    };
+  }catch(e){
+    console.log('fedwatch.json failed:', e.message);
     return defaults;
   }
 }
