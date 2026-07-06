@@ -384,8 +384,10 @@ async function fetchAllData(){
     results.dxy={name:'dxy',price:null,error:e.message,source:'fallback',updated:ts()};
   }
 
-  // 4. 原油 - WTI (新浪 hf_OIL)
-  results.oil = await fetchSinaOil();
+  // 4. 原油 - WTI + Brent (新浪 hf_OIL)
+  const oilData = await fetchSinaOil();
+  results.oilWti = oilData.wti;
+  results.oilBrent = oilData.brent;
 
   // 5. 美债 + 中国国债 - 从同域 bonds.json 读取 (GitHub Actions每5分钟更新)
   const bondData = await fetchBondYields();
@@ -408,22 +410,37 @@ async function fetchSinaOil(){
     // 主方案: 同域JSON文件 (无CORS问题)
     const r = await fetch('oil.json?t=' + Date.now());
     const d = await r.json();
+    const result = {};
     if(d && d.wti && d.wti.price){
       const p = d.wti.price;
       const pc = d.wti.prevClose;
       const c = p && pc ? r4(p - pc) : null;
       const cp = p && pc ? r2((p - pc) / pc * 100) : null;
-      return {
+      result.wti = {
         name:'oil', symbol:'WTI', price:p, prevClose:pc,
         high: d.wti.high || null, low: d.wti.low || null,
         change: c, changePct: cp,
         source:'新浪财经(同域)', updated: d.updated || ts()
       };
     }
+    if(d && d.brent && d.brent.price){
+      const p = d.brent.price;
+      const pc = d.brent.prevClose;
+      const c = p && pc ? r4(p - pc) : null;
+      const cp = p && pc ? r2((p - pc) / pc * 100) : null;
+      result.brent = {
+        name:'oil', symbol:'Brent', price:p, prevClose:pc,
+        high: d.brent.high || null, low: d.brent.low || null,
+        change: c, changePct: cp,
+        source:'新浪财经(同域)', updated: d.updated || ts()
+      };
+    }
+    if(result.wti || result.brent) return result;
   }catch(e){ console.log('oil.json failed:', e.message); }
 
   // 降级: JSONP script标签方式 (当GitHub Actions未初始化时)
-  return fetchOilJSONP();
+  const wti = await fetchOilJSONP();
+  return {wti};
 }
 
 function fetchOilJSONP(){
@@ -578,7 +595,8 @@ function renderAll(data){
   }
 
   let html='';
-  html+=card('oil','🛢️ 能源','WTI原油',data.oil||{},'USD/桶');
+  html+=card('oil','🛢️ 能源','WTI原油',data.oilWti||{},'USD/桶');
+  html+=card('oil','🛢️ 能源','布伦特原油',data.oilBrent||{},'USD/桶');
   html+=card('gold','🥇 贵金属','COMEX黄金',data.gold||{},'USD/盎司');
   html+=card('dxy','💵 外汇','美元指数 DXY',data.dxy||{},'');
   html+=card('cnh','🇨🇳 外汇','离岸人民币 CNH',data.cnh||{},'');
@@ -604,7 +622,7 @@ function buildFed(fed){
 }
 
 function showSkeleton(){
-  dataGrid.innerHTML=Array(9).fill(0).map(()=>'<div class="card"><div class="card-category skeleton skel-change" style="width:40%"></div><div class="skeleton skel-price"></div><div class="skeleton skel-change"></div></div>').join('');
+  dataGrid.innerHTML=Array(10).fill(0).map(()=>'<div class="card"><div class="card-category skeleton skel-change" style="width:40%"></div><div class="skeleton skel-price"></div><div class="skeleton skel-change"></div></div>').join('');
 }
 
 // ==================== SHARE ====================
@@ -620,7 +638,8 @@ function buildShareText(){
     '📊 实时财经数据看板',
     '🕐 '+new Date().toLocaleString('zh-CN'),
     '━━━━━━━━━━━━━━',
-    '🛢️ WTI原油: '+f((lastData.oil||{}).price)+fc(lastData.oil),
+    '🛢️ WTI原油: '+f((lastData.oilWti||{}).price)+fc(lastData.oilWti),
+    '🛢️ 布伦特原油: '+f((lastData.oilBrent||{}).price)+fc(lastData.oilBrent),
     '🥇 黄金: '+f((lastData.gold||{}).price),
     '💵 美元指数: '+f((lastData.dxy||{}).price)+fc(lastData.dxy),
     '🇨🇳 离岸人民币: '+f((lastData.cnh||{}).price,4)+fc(lastData.cnh),
@@ -701,7 +720,8 @@ function generateShareImage(){
 
     // Data rows — 所有项目显示变化
     const items=[
-      {label:'🛢️ WTI原油',val:lastData.oil||{},fmt:'price',unit:' USD/桶',dec:2},
+      {label:'🛢️ WTI原油',val:lastData.oilWti||{},fmt:'price',unit:' USD/桶',dec:2},
+      {label:'🛢️ 布伦特原油',val:lastData.oilBrent||{},fmt:'price',unit:' USD/桶',dec:2},
       {label:'🥇 黄金',val:lastData.gold||{},fmt:'price',unit:' USD/盎司',dec:2},
       {label:'💵 美元指数',val:lastData.dxy||{},fmt:'price',unit:'',dec:2},
       {label:'🇨🇳 离岸人民币',val:lastData.cnh||{},fmt:'price',unit:'',dec:4},
