@@ -595,7 +595,6 @@ function renderAll(data){
   }
 
   let html='';
-  html+=card('oil','🛢️ 能源','WTI原油',data.oilWti||{},'USD/桶');
   html+=card('oil','🛢️ 能源','布伦特原油',data.oilBrent||{},'USD/桶');
   html+=card('gold','🥇 贵金属','COMEX黄金',data.gold||{},'USD/盎司');
   html+=card('dxy','💵 外汇','美元指数 DXY',data.dxy||{},'');
@@ -622,7 +621,7 @@ function buildFed(fed){
 }
 
 function showSkeleton(){
-  dataGrid.innerHTML=Array(10).fill(0).map(()=>'<div class="card"><div class="card-category skeleton skel-change" style="width:40%"></div><div class="skeleton skel-price"></div><div class="skeleton skel-change"></div></div>').join('');
+  dataGrid.innerHTML=Array(9).fill(0).map(()=>'<div class="card"><div class="card-category skeleton skel-change" style="width:40%"></div><div class="skeleton skel-price"></div><div class="skeleton skel-change"></div></div>').join('');
 }
 
 // ==================== SHARE ====================
@@ -638,7 +637,6 @@ function buildShareText(){
     '📊 实时财经数据看板',
     '🕐 '+new Date().toLocaleString('zh-CN'),
     '━━━━━━━━━━━━━━',
-    '🛢️ WTI原油: '+f((lastData.oilWti||{}).price)+fc(lastData.oilWti),
     '🛢️ 布伦特原油: '+f((lastData.oilBrent||{}).price)+fc(lastData.oilBrent),
     '🥇 黄金: '+f((lastData.gold||{}).price),
     '💵 美元指数: '+f((lastData.dxy||{}).price)+fc(lastData.dxy),
@@ -720,7 +718,6 @@ function generateShareImage(){
 
     // Data rows — 所有项目显示变化
     const items=[
-      {label:'🛢️ WTI原油',val:lastData.oilWti||{},fmt:'price',unit:' USD/桶',dec:2},
       {label:'🛢️ 布伦特原油',val:lastData.oilBrent||{},fmt:'price',unit:' USD/桶',dec:2},
       {label:'🥇 黄金',val:lastData.gold||{},fmt:'price',unit:' USD/盎司',dec:2},
       {label:'💵 美元指数',val:lastData.dxy||{},fmt:'price',unit:'',dec:2},
