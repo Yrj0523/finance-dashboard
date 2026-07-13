@@ -1,7 +1,7 @@
 {
-  "updated": "2026-07-13 20:41:47",
-  "source": "growbeansprout.com",
-  "meetingDate": "29 Jul 2026",
+  "updated": "2026-07-13 21:34:54",
+  "source": "缓存数据",
+  "meetingDate": "2026-07-29",
   "currentRate": "3.50%-3.75%",
   "meetings": [
     {
@@ -16,5 +16,6 @@
       "rate": "降息25bp",
       "probability": 0.0
     }
-  ]
+  ],
+  "note": "fallback cache"
 }
