@@ -1,16 +1,16 @@
 {
-  "updated": "2026-08-05 23:32:47",
+  "updated": "2026-08-06 00:54:44",
   "source": "新浪财经",
   "wti": {
-    "price": 75.0,
+    "price": 74.854,
     "prevClose": 75.22,
-    "high": 75.02,
+    "high": 74.9,
     "low": 75.27
   },
   "brent": {
-    "price": 79.289,
-    "prevClose": 79.36,
-    "high": 79.61,
-    "low": 80.95
+    "price": 79.236,
+    "prevClose": 79.45,
+    "high": 79.28,
+    "low": 79.49
   }
 }
