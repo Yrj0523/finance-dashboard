@@ -1,16 +1,16 @@
 {
-  "updated": "2026-08-24 05:49:48",
+  "updated": "2026-08-24 06:26:28",
   "source": "growbeansprout.com",
   "meetingDate": "16 Sep 2026",
   "currentRate": "3.50%-3.75%",
   "meetings": [
     {
       "rate": "维持利率 3.50%-3.75%",
-      "probability": 61.0
+      "probability": 63.0
     },
     {
       "rate": "加息25bp",
-      "probability": 39.0
+      "probability": 37.0
     },
     {
       "rate": "降息25bp",
